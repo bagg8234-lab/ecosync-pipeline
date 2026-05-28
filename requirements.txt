@@ -1,0 +1,17 @@
+# kafka에 데이터 넣고 꺼내기
+kafka-python==2.2.3
+# postgreSQL과 연결하기 위한 라이브러리
+psycopg2-binary==2.9.9
+# 데이터 타입 검증
+pydantic==2.7.1
+# 이상치 감지
+great-expectations==0.18.19
+# MinIO와 연결하기 위한 라이브러리
+boto3==1.34.69
+# 더미 데이터 생성
+numpy==1.26.4
+faker==24.11.0
+# .env 파일 읽기
+python-dotenv==1.0.1
+# 간이 대시보드
+streamlit==1.34.0
