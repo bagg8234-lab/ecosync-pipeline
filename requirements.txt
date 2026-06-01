@@ -3,7 +3,7 @@ kafka-python==2.2.3
 # postgreSQL과 연결하기 위한 라이브러리
 psycopg2-binary==2.9.9
 # 데이터 타입 검증
-pydantic==2.7.1
+pydantic==2.7.4
 # 이상치 감지
 great-expectations==0.18.19
 # MinIO와 연결하기 위한 라이브러리
