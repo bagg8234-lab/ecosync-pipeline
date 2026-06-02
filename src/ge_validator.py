@@ -17,6 +17,7 @@ def validate_generation_stats(data: list[dict]) -> tuple[bool, list, object]:
     batch_request = data_asset.build_batch_request(dataframe=df)
 
     # Expectation Suite 생성
+    # 데이터 검증 규칙들의 묶음 : 'Suite'
     context.add_or_update_expectation_suite("generation_suite")
     validator = context.get_validator(
         batch_request=batch_request,
@@ -33,7 +34,9 @@ def validate_generation_stats(data: list[dict]) -> tuple[bool, list, object]:
     validator.expect_column_values_to_not_be_null(column="city")
 
     # 검증 실행
+    # suite에 모인 규칙들을 기반으로 데이터 검증을 수행하고 결과를 results로 반환
     results = validator.validate()
+    # results.success는 모든 검증이 통과했는지 여부를 나타내는 불리언 값
     success = results.success
     failures = [
         str(r) for r in results.results if not r.success
@@ -46,11 +49,16 @@ def save_html_report(results, report_path: str = "/app/logs/ge_report.html"):
     report_data = []
     for r in results.results:
         report_data.append({
+            # 실행된 검증 규칙의 종류 (예: expect_column_values_to_be_between)
             "expectation_type": r.expectation_config.expectation_type,
+            # 규칙이 적용된 대상 컬럼명 (예: generation_kwh)
+            # column 키가 없을 경우 빈 문자열로 처리 -> 대상이 열이 아니라 행이나 테이블인 경우도 있기 때문
             "column": r.expectation_config.kwargs.get("column", ""),
+            # 해당 규칙의 성공 여부(True/False)
             "success": r.success,
             "unexpected_count": r.result.get("unexpected_count", 0),
             "unexpected_percent": r.result.get("unexpected_percent", 0),
+            # 규칙에 실패한 경우, 이상치로 간주된 값들의 일부 리스트 (예: [-100.0, None])
             "partial_unexpected_list": r.result.get("partial_unexpected_list", [])
         })
 
