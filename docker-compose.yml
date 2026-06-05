@@ -42,6 +42,10 @@ services:
     command: server /data --console-address ":9001"
 
   app:
+    ports:
+      - "8501:8501"
+    environment:
+      TZ: Asia/Seoul
     build: .
     container_name: ecosync-app
     env_file:
