@@ -52,7 +52,9 @@ def match_generation_to_demand(generation_list: list[dict], demand_list: list[di
             if available[gen['id']] <= 0:
                 continue
 
-            matched_kwh = min(needed, available[gen['id']])
+            matched_kwh = round(min(needed, available[gen['id']]), 2)
+            if matched_kwh <= 0:
+                continue
             available[gen['id']] -= matched_kwh
             needed -= matched_kwh
 
@@ -61,7 +63,7 @@ def match_generation_to_demand(generation_list: list[dict], demand_list: list[di
                 "demand_id": demand['id'],
                 "generation_city": gen['city'],
                 "demand_city": demand['city'],
-                "matched_kwh": round(matched_kwh, 2),
+                "matched_kwh": matched_kwh,
                 "distance_km": round(distance, 2),
                 "matched_at": datetime.now().isoformat()
             })

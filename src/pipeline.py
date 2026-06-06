@@ -1,0 +1,91 @@
+import json
+import time
+from kafka import KafkaConsumer
+from kafka.errors import NoBrokersAvailable
+from validator import validate_generation, validate_demand
+from dead_letter_queue import send_to_dlq
+from matching_engine import match_generation_to_demand, save_trades
+from db_client import upsert_generation, upsert_demand, create_table
+from minio_client import create_minio_client, create_bucket, upload_raw_data
+
+
+def create_consumer(topics: list[str]):
+    """Kafka Consumer 생성 (재시도 로직 포함)"""
+    for i in range(5):
+        try:
+            consumer = KafkaConsumer(
+                *topics,
+                bootstrap_servers='kafka:9092',
+                value_deserializer=lambda v: json.loads(v.decode('utf-8')),
+                auto_offset_reset='latest',
+                group_id='ecosync-pipeline-v2'
+            )
+            print(f"파이프라인 Consumer 연결 성공!")
+            return consumer
+        except NoBrokersAvailable:
+            print(f"연결 실패 ({i+1}/5) — 5초 후 재시도...")
+            time.sleep(5)
+    raise Exception("Consumer 연결 실패")
+
+
+def run_pipeline():
+    """
+    Kafka Consumer → Validator → 매칭 엔진 전체 파이프라인
+    """
+    print("⚡EcoSync 파이프라인 시작 \n")
+
+    # 초기화
+    create_table()
+    minio_client = create_minio_client()
+    create_bucket(minio_client, 'ecosync-raw')
+
+    # Kafka Consumer 생성 (generation + demand 토픽 구독)
+    consumer = create_consumer(['generation', 'demand'])
+
+    gen_buffer = []   # 발전량 데이터 버퍼
+    dem_buffer = []   # 소비량 데이터 버퍼
+    BATCH_SIZE = 10   # 10개 모이면 매칭 실행
+
+    print(f"토픽 구독 중: generation, demand")
+    print(f"배치 사이즈: {BATCH_SIZE}개\n")
+
+    for message in consumer:
+        topic = message.topic
+        data = message.value
+
+        if topic == 'generation':
+            is_valid, error = validate_generation(data)
+            if is_valid:
+                upsert_generation(data)
+                upload_raw_data(minio_client, [data], 'generation')
+                gen_buffer.append(data)
+                print(f"✅ 발전량 통과: {data['city']} | {data['generation_kwh']} kWh")
+            else:
+                send_to_dlq(data, error, 'generation')
+                print(f"❌ 발전량 DLQ: {data['city']} | {error[:50]}")
+
+        elif topic == 'demand':
+            is_valid, error = validate_demand(data)
+            if is_valid:
+                upsert_demand(data)
+                upload_raw_data(minio_client, [data], 'demand')
+                dem_buffer.append(data)
+                print(f"✅ 소비량 통과: {data['city']} | {data['demand_kwh']} kWh")
+            else:
+                send_to_dlq(data, error, 'demand')
+                print(f"❌ 소비량 DLQ: {data['city']} | {error[:50]}")
+
+        # 버퍼에 10개씩 쌓이면 매칭 실행
+        if len(gen_buffer) >= BATCH_SIZE and len(dem_buffer) >= BATCH_SIZE:
+            print(f"\n--- 매칭 엔진 실행 ({BATCH_SIZE}개 배치) ---")
+            trades, unmatched = match_generation_to_demand(gen_buffer, dem_buffer)
+            save_trades(trades, unmatched)
+            print(f"거래 체결: {len(trades)}건 | 실패: {len(unmatched)}건\n")
+
+            # 버퍼 초기화
+            gen_buffer.clear()
+            dem_buffer.clear()
+
+
+if __name__ == "__main__":
+    run_pipeline()
