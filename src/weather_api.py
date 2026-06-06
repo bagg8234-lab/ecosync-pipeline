@@ -1,5 +1,4 @@
 import os
-from dotenv import load_dotenv
 import requests
 from datetime import datetime, timedelta
 
@@ -15,7 +14,6 @@ CITY_STN = {
 # 지점번호 → 도시이름 역산용
 STN_TO_CITY = {v: k for k, v in CITY_STN.items()}
 
-load_dotenv()
 API_KEY = os.getenv('WEATHER_API_KEY')
 
 
