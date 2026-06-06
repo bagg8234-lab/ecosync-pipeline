@@ -1,3 +1,5 @@
+import os
+from dotenv import load_dotenv
 import requests
 from datetime import datetime, timedelta
 
@@ -13,7 +15,8 @@ CITY_STN = {
 # 지점번호 → 도시이름 역산용
 STN_TO_CITY = {v: k for k, v in CITY_STN.items()}
 
-API_KEY = "MWb0_NxZRfOm9PzcWRXz9g"
+load_dotenv()
+API_KEY = os.getenv('WEATHER_API_KEY')
 
 
 def get_solar_radiation(city: str = None, tm: str = None) -> list[dict]:
