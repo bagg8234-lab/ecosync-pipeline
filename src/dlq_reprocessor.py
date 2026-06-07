@@ -12,7 +12,8 @@ def create_consumer():
                 bootstrap_servers='kafka:9092',
                 value_deserializer=lambda v:json.loads(v.decode('utf-8')),
                 auto_offset_reset='earliest',
-                group_id='dlq-reprocessor'
+                group_id=f'dlq-reprocessor-{int(time.time())}',
+                consumer_timeout_ms=10000  # 10초 동안 메시지 없으면 종료
             )
             print("DLP Consumer 연결 성공")
             return consumer

@@ -68,7 +68,23 @@ services:
       - ./src:/app/src
       - ./logs:/app/logs
     command: tail -f /dev/null
+  
+  dlq-reprocessor:
+    build: .
+    container_name: ecosync-dlq-reprocessor
+    environment:
+      TZ: Asia/Seoul
+    env_file:
+      - .env
+    depends_on:
+      - kafka
+      - db
+    volumes:
+      - ./src:/app/src
+    command: >
+      sh -c "echo '0 * * * * python /app/src/dlq_reprocessor.py >> /app/logs/dlq.log 2>&1' | crontab - && crond -f"
 
 volumes:
   db_data:
   minio_data:
+
