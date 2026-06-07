@@ -7,25 +7,39 @@
 
 ---
 
+## 스크린샷
+
+### Streamlit 대시보드
+![dashboard1](docs/images/dashboard1.png)
+![dashboard2](docs/images/dashboard2.png)
+![dashboard3](docs/images/dashboard3.png)
+
+### Kafka UI
+![kafka-ui](docs/images/kafka-ui.png)
+
+---
+
 ## 아키텍처
 
 ```
-[더미 데이터 생성기]
-        ↓
-   [Kafka Producer]
+[KPX 실제 발전량 API]     [수요량 더미 데이터]
+        ↓                        ↓
+   [Kafka Producer]──────────────┘
         ↓
       [Kafka]          ← 실시간 데이터 대기줄
         ↓
-  [Kafka Consumer]
+  [Pipeline Consumer]
         ↓
    [Validator]         ← Pydantic + Great Expectations
    ↙         ↘
 [DLQ]      [PostgreSQL + MinIO]
 (실패)        (원본 + 처리 데이터)
+  ↓
+[DLQ Reprocessor]     ← Cron (매 1시간)
                 ↓
          [매칭 엔진]    ← Haversine 거리 기반
                 ↓
-       [Dynamic Pricing] ← 기상청 API + 수급 비율
+       [Dynamic Pricing] ← 기상청 API + KPX SMP
                 ↓
       [Streamlit 대시보드]
 ```
@@ -38,7 +52,7 @@
 | :--- | :--- | :--- |
 | Orchestrator | Python 스크립트 | Azure Data Factory |
 | Compute | Docker (Python 3.12-alpine) | Azure Functions |
-| Message Broker | Kafka | Azure Event Hubs |
+| Message Broker | Kafka + Kafka UI | Azure Event Hubs |
 | Storage | MinIO (S3 호환) | ADLS Gen2 |
 | Database | PostgreSQL v16-alpine | Azure SQL Database |
 | Visualization | Streamlit / Tableau | Power BI |
@@ -52,6 +66,7 @@
 - Pydantic — 타입/범위/필수값 검증 (음수 발전량, null 차단)
 - Great Expectations — 통계적 이상치 감지 (전체 분포 검증)
 - 검증 실패 데이터 → Dead Letter Queue 격리
+- DLQ 재처리 — Cron으로 매 1시간마다 자동 재처리
 
 **2. 실시간 거래 매칭 엔진**
 - Haversine 공식으로 위도/경도 거리 계산
@@ -61,8 +76,13 @@
 
 **3. Dynamic Pricing**
 - 기상청 API 연동 (실시간 일사량/기온 데이터)
+- KPX SMP 실제 데이터 연동 (기존 고정값 150원 → 실제 시장가격)
 - 일사량 계수 × 수급 비율 × 기온 보정으로 가격 산출
-- SMP(계통한계가격) 기준선 활용
+
+**4. 실제 데이터 연동**
+- KPX 전력거래소 태양광 발전량 API (지역별 시간별)
+- KPX SMP 계통한계가격 API
+- 수요량은 실제 공개 API 부재로 더미 데이터 유지
 
 ---
 
@@ -75,17 +95,23 @@ ecosync-project/
 ├── Dockerfile              # 앱 컨테이너 빌드
 ├── requirements.txt        # 파이썬 라이브러리
 ├── logs/                   # 로그 파일
+│   └── dlq.log             # DLQ 재처리 로그
+├── docs/
+│   └── images/             # 스크린샷
 └── src/
-    ├── data_generator.py   # 더미 데이터 생성
+    ├── data_generator.py   # 더미 데이터 생성 (수요량)
     ├── kafka_producer.py   # Kafka 발행
     ├── kafka_consumer.py   # Kafka 수신 (테스트용)
     ├── validator.py        # Pydantic 검증
     ├── ge_validator.py     # Great Expectations 검증
     ├── dead_letter_queue.py # DLQ 격리
+    ├── dlq_reprocessor.py  # DLQ 재처리 (Cron)
     ├── minio_client.py     # MinIO 적재
     ├── db_client.py        # PostgreSQL UPSERT
     ├── matching_engine.py  # 거래 매칭
-    ├── weather_api.py      # 기상청 API
+    ├── weather_api.py      # 기상청 일사량 API
+    ├── smp_api.py          # KPX SMP API
+    ├── generation_api.py   # KPX 발전량 API
     ├── dynamic_pricing.py  # 가격 산출
     ├── pipeline.py         # End-to-End 파이프라인
     └── dashboard.py        # Streamlit 대시보드
@@ -127,4 +153,9 @@ docker exec -it ecosync-app streamlit run src/dashboard.py --server.address=0.0.
 ```
 
 브라우저에서 `http://localhost:8501` 접속
+
+### 5. Kafka UI
+
+브라우저에서 `http://localhost:8080` 접속  
+토픽 메시지, Consumer 그룹, 브로커 상태 모니터링 가능
 
