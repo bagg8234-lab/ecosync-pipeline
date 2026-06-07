@@ -24,7 +24,7 @@ def get_solar_generation() -> list[dict]:
   params = {
       "serviceKey": API_KEY,
       "pageNo": 1,
-      "numOfRows": 100,
+      "numOfRows": 500,
       "dataType": "JSON",
   }
 

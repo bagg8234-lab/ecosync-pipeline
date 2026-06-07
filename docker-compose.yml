@@ -27,6 +27,16 @@ services:
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
     ports:
       - "9092:9092"
+  
+  kafka-ui:
+    image: redpandadata/console:latest
+    container_name: ecosync-kafka-ui
+    ports:
+      - "8080:8080"
+    environment:
+      KAFKA_BROKERS: kafka:9092
+    depends_on:
+      - kafka
 
   minio:
     image: minio/minio:latest
