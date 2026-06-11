@@ -15,7 +15,7 @@ def create_consumer():
                 group_id=f'dlq-reprocessor-{int(time.time())}',
                 consumer_timeout_ms=10000  # 10초 동안 메시지 없으면 종료
             )
-            print("DLP Consumer 연결 성공")
+            print("DLQ Consumer 연결 성공")
             return consumer
         except NoBrokersAvailable:
             print(f"연결 실패 ({i+1}/5) - 5초 후 재시도...")

@@ -40,6 +40,7 @@ def process_generation(data: dict, minio_client, gen_buffer: list):
         upsert_generation(data)
     except Exception as e:
         send_to_dlq(data, f"DB 저장 실패: {str(e)}", 'generation', error_type="system_error")
+        print(f"❌ 발전량 DLQ [system_error]: DB 오류 | {str(e)[:50]}")
         return
     
     # MinIO 저장 - 실패 시 system_error로 DLQ
