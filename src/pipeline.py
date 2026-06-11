@@ -27,6 +27,56 @@ def create_consumer(topics: list[str]):
             time.sleep(5)
     raise Exception("Consumer 연결 실패")
 
+def process_generation(data: dict, minio_client, gen_buffer: list):
+    """발전량 데이터 처리: 검증 -> DB/MinIO 저장 -> 버퍼 추가"""
+    is_valid, error = validate_generation(data)
+    if not is_valid:
+        send_to_dlq(data, error, 'generation', error_type="data_error")
+        print(f"❌ 발전량 DLQ [data_error]: {data.get('city')} | {error[:50]}")
+        return
+    
+    # DB 저장 - 실패 시 system_error로 DLQ
+    try:
+        upsert_generation(data)
+    except Exception as e:
+        send_to_dlq(data, f"DB 저장 실패: {str(e)}", 'generation', error_type="system_error")
+        return
+    
+    # MinIO 저장 - 실패 시 system_error로 DLQ
+    try:
+        upload_raw_data(minio_client, [data], 'generation')
+    except Exception as e:
+        send_to_dlq(data, f"MinIO 저장 실패: {str(e)}", 'generation', error_type="system_error")
+        print(f"❌ 발전량 DLQ [system_error]: MinIO 오류 | {str(e)[:50]}")
+        return
+    
+    gen_buffer.append(data)
+    print(f"✅ 발전량 통과: {data['city']} | {data['generation_kwh']} kWh" )
+
+def process_demand(data: dict, minio_client, dem_buffer: list):
+    """소비량 데이터 처리: 검증 → DB/MinIO 저장 → 버퍼 추가"""
+    is_valid, error = validate_demand(data)
+    if not is_valid:
+        send_to_dlq(data, error, 'demand', error_type="data_error")
+        print(f"❌ 소비량 DLQ [data_error]: {data.get('city')} | {error[:50]}")
+        return
+ 
+    try:
+        upsert_demand(data)
+    except Exception as e:
+        send_to_dlq(data, f"DB 저장 실패: {str(e)}", 'demand', error_type="system_error")
+        print(f"❌ 소비량 DLQ [system_error]: DB 오류 | {str(e)[:50]}")
+        return
+ 
+    try:
+        upload_raw_data(minio_client, [data], 'demand')
+    except Exception as e:
+        send_to_dlq(data, f"MinIO 저장 실패: {str(e)}", 'demand', error_type="system_error")
+        print(f"❌ 소비량 DLQ [system_error]: MinIO 오류 | {str(e)[:50]}")
+        return
+ 
+    dem_buffer.append(data)
+    print(f"✅ 소비량 통과: {data['city']} | {data['demand_kwh']} kWh")
 
 def run_pipeline():
     """
@@ -54,26 +104,9 @@ def run_pipeline():
         data = message.value
 
         if topic == 'generation':
-            is_valid, error = validate_generation(data)
-            if is_valid:
-                upsert_generation(data)
-                upload_raw_data(minio_client, [data], 'generation')
-                gen_buffer.append(data)
-                print(f"✅ 발전량 통과: {data['city']} | {data['generation_kwh']} kWh")
-            else:
-                send_to_dlq(data, error, 'generation')
-                print(f"❌ 발전량 DLQ: {data['city']} | {error[:50]}")
-
+            process_generation(data, minio_client, gen_buffer)
         elif topic == 'demand':
-            is_valid, error = validate_demand(data)
-            if is_valid:
-                upsert_demand(data)
-                upload_raw_data(minio_client, [data], 'demand')
-                dem_buffer.append(data)
-                print(f"✅ 소비량 통과: {data['city']} | {data['demand_kwh']} kWh")
-            else:
-                send_to_dlq(data, error, 'demand')
-                print(f"❌ 소비량 DLQ: {data['city']} | {error[:50]}")
+            process_demand(data, minio_client, dem_buffer)
 
         # 버퍼에 10개씩 쌓이면 매칭 실행
         if len(gen_buffer) >= BATCH_SIZE and len(dem_buffer) >= BATCH_SIZE:
