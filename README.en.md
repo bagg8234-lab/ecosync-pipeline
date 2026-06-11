@@ -5,6 +5,7 @@
 A serverless data pipeline that brokers real-time energy trading between solar energy prosumers and consumers, optimizing energy efficiency through data collection, validation, and matching.
 
 ---
+
 ## Screenshots
 
 ### Streamlit Dashboard
@@ -29,17 +30,18 @@ A serverless data pipeline that brokers real-time energy trading between solar e
   [Pipeline Consumer]
         ↓
    [Validator]         ← Pydantic + Great Expectations
-   ↙         ↘
-[DLQ]      [PostgreSQL + MinIO]
-(Failed)     (Raw + Processed data)
-  ↓
-[DLQ Reprocessor]     ← Cron (every 1 hour)
-                ↓
-         [Matching Engine]  ← Haversine distance-based
-                ↓
-       [Dynamic Pricing]    ← Weather API + KPX SMP
-                ↓
-      [Streamlit Dashboard]
+   ↙              ↘
+[data_error DLQ]   [PostgreSQL + MinIO]
+(Manual review)  ↙         ↘
+           Success     [system_error DLQ]
+                             ↓
+                     [DLQ Reprocessor]  ← Cron (every 1 hour)
+                             ↓
+                      [Matching Engine]  ← Haversine distance-based
+                             ↓
+                      [Dynamic Pricing]  ← Weather API + KPX SMP
+                             ↓
+                    [Streamlit Dashboard]
 ```
 
 ---
@@ -63,8 +65,9 @@ A serverless data pipeline that brokers real-time energy trading between solar e
 **1. Data Integrity Validation**
 - Pydantic — Type/range/required field validation (negative generation, null values)
 - Great Expectations — Statistical anomaly detection (distribution validation)
-- Failed data → Dead Letter Queue isolation
-- DLQ Reprocessor — Automatic retry every 1 hour via Cron
+- Validation failure → isolated to DLQ as `data_error` (requires manual review)
+- DB/MinIO failure → isolated to DLQ as `system_error` (auto-retry target)
+- DLQ Reprocessor — Cron retries only `system_error` messages every 1 hour
 
 **2. Real-time Trade Matching Engine**
 - Distance calculation using Haversine formula
@@ -81,6 +84,19 @@ A serverless data pipeline that brokers real-time energy trading between solar e
 - KPX solar generation API (by region and hour)
 - KPX SMP (System Marginal Price) API
 - Demand data uses dummy data due to lack of public API
+
+---
+
+## Database Schema
+
+![db](docs/images/db.png)
+
+| Table | Description |
+| :--- | :--- |
+| `generation` | Raw solar generation data |
+| `demand` | Demand data |
+| `trades` | Successful trade records |
+| `matching_errors` | Failed match log stored separately |
 
 ---
 

@@ -31,17 +31,18 @@
   [Pipeline Consumer]
         ↓
    [Validator]         ← Pydantic + Great Expectations
-   ↙         ↘
-[DLQ]      [PostgreSQL + MinIO]
-(실패)        (원본 + 처리 데이터)
-  ↓
-[DLQ Reprocessor]     ← Cron (매 1시간)
-                ↓
-         [매칭 엔진]    ← Haversine 거리 기반
-                ↓
-       [Dynamic Pricing] ← 기상청 API + KPX SMP
-                ↓
-      [Streamlit 대시보드]
+   ↙              ↘
+[data_error DLQ]   [PostgreSQL + MinIO]
+(수동 확인)      ↙         ↘
+           성공        [system_error DLQ]
+                            ↓
+                    [DLQ Reprocessor]  ← Cron (매 1시간)
+                            ↓
+                      [매칭 엔진]      ← Haversine 거리 기반
+                            ↓
+                    [Dynamic Pricing]  ← 기상청 API + KPX SMP
+                            ↓
+                   [Streamlit 대시보드]
 ```
 
 ---
@@ -65,8 +66,9 @@
 **1. 데이터 무결성 검증**
 - Pydantic — 타입/범위/필수값 검증 (음수 발전량, null 차단)
 - Great Expectations — 통계적 이상치 감지 (전체 분포 검증)
-- 검증 실패 데이터 → Dead Letter Queue 격리
-- DLQ 재처리 — Cron으로 매 1시간마다 자동 재처리
+- 검증 실패 데이터 → `data_error`로 DLQ 격리 (수동 확인 대상)
+- DB/MinIO 오류 → `system_error`로 DLQ 격리 (자동 재처리 대상)
+- DLQ 재처리 — Cron으로 매 1시간마다 `system_error`만 자동 재처리
 
 **2. 실시간 거래 매칭 엔진**
 - Haversine 공식으로 위도/경도 거리 계산
@@ -83,6 +85,19 @@
 - KPX 전력거래소 태양광 발전량 API (지역별 시간별)
 - KPX SMP 계통한계가격 API
 - 수요량은 실제 공개 API 부재로 더미 데이터 유지
+
+---
+
+## 데이터베이스 스키마
+
+![db](docs/images/db.png)
+
+| 테이블 | 역할 |
+| :--- | :--- |
+| `generation` | 태양광 발전량 원본 데이터 적재 |
+| `demand` | 수요량 데이터 적재 |
+| `trades` | 매칭 성공 거래 내역 |
+| `matching_errors` | 매칭 실패 로그 분리 적재 |
 
 ---
 
@@ -158,4 +173,3 @@ docker exec -it ecosync-app streamlit run src/dashboard.py --server.address=0.0.
 
 브라우저에서 `http://localhost:8080` 접속  
 토픽 메시지, Consumer 그룹, 브로커 상태 모니터링 가능
-
