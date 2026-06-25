@@ -1,12 +1,13 @@
 import json
 import time
+import os
 from kafka import KafkaConsumer
 from kafka.errors import NoBrokersAvailable
 from validator import validate_generation, validate_demand
 from dead_letter_queue import send_to_dlq
 from matching_engine import match_generation_to_demand, save_trades
 from db_client import upsert_generation, upsert_demand, create_table
-from minio_client import create_minio_client, create_bucket, upload_raw_data
+from minio_client import create_storage_client, create_bucket, upload_raw_data
 
 
 def create_consumer(topics: list[str]):
@@ -15,7 +16,11 @@ def create_consumer(topics: list[str]):
         try:
             consumer = KafkaConsumer(
                 *topics,
-                bootstrap_servers='kafka:9092',
+                bootstrap_servers=os.getenv('EVENT_HUBS_NAMESPACE') + '.servicebus.windows.net:9093',
+                security_protocol='SASL_SSL',
+                sasl_mechanism='PLAIN',
+                sasl_plain_username='$ConnectionString',
+                sasl_plain_password=os.getenv('EVENT_HUBS_CONNECTION_STRING'),
                 value_deserializer=lambda v: json.loads(v.decode('utf-8')),
                 auto_offset_reset='latest',
                 group_id='ecosync-pipeline-v2'
@@ -87,7 +92,7 @@ def run_pipeline():
 
     # 초기화
     create_table()
-    minio_client = create_minio_client()
+    minio_client = create_storage_client()
     create_bucket(minio_client, 'ecosync-raw')
 
     # Kafka Consumer 생성 (generation + demand 토픽 구독)

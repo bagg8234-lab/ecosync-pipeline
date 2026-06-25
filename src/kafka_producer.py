@@ -1,5 +1,6 @@
 import json
 import time
+import os
 from kafka import KafkaProducer
 from kafka.errors import NoBrokersAvailable
 from generation_api import get_solar_generation
@@ -17,7 +18,11 @@ def create_producer():
     for i in range(5):
         try:
             producer = KafkaProducer(
-                bootstrap_servers='kafka:9092',
+                bootstrap_servers=os.getenv('EVENT_HUBS_NAMESPACE') + '.servicebus.windows.net:9093',
+                security_protocol='SASL_SSL',
+                sasl_mechanism='PLAIN',
+                sasl_plain_username='$ConnectionString',
+                sasl_plain_password=os.getenv('EVENT_HUBS_CONNECTION_STRING'),
                 value_serializer=lambda v: json.dumps(v).encode('utf-8')
             )
             print("Kafka 연결 성공!")
