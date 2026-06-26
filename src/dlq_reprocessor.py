@@ -1,19 +1,27 @@
 import json
 import time
+import os
+from dotenv import load_dotenv
 from kafka import KafkaConsumer, KafkaProducer
 from kafka.errors import NoBrokersAvailable
 from validator import validate_generation, validate_demand
+
+load_dotenv('C:/TOY/ecosync-project/.env')
 
 def create_consumer():
     for i in range(5):
         try:
             consumer = KafkaConsumer(
                 'dead-letter',
-                bootstrap_servers='kafka:9092',
-                value_deserializer=lambda v:json.loads(v.decode('utf-8')),
+                bootstrap_servers=os.getenv('EVENT_HUBS_NAMESPACE') + '.servicebus.windows.net:9093',
+                security_protocol='SASL_SSL',
+                sasl_mechanism='PLAIN',
+                sasl_plain_username='$ConnectionString',
+                sasl_plain_password=os.getenv('EVENT_HUBS_CONNECTION_STRING'),
+                value_deserializer=lambda v: json.loads(v.decode('utf-8')),
                 auto_offset_reset='earliest',
                 group_id=f'dlq-reprocessor-{int(time.time())}',
-                consumer_timeout_ms=10000  # 10초 동안 메시지 없으면 종료
+                consumer_timeout_ms=10000
             )
             print("DLQ Consumer 연결 성공")
             return consumer
@@ -24,11 +32,14 @@ def create_consumer():
 
 
 def create_producer():
-    """Dead Letter Queue Producer 생성 """
     for i in range(5):
         try:
             producer = KafkaProducer(
-                bootstrap_servers='kafka:9092',
+                bootstrap_servers=os.getenv('EVENT_HUBS_NAMESPACE') + '.servicebus.windows.net:9093',
+                security_protocol='SASL_SSL',
+                sasl_mechanism='PLAIN',
+                sasl_plain_username='$ConnectionString',
+                sasl_plain_password=os.getenv('EVENT_HUBS_CONNECTION_STRING'),
                 value_serializer=lambda v: json.dumps(v).encode('utf-8')
             )
             print("DLQ Producer 연결 성공")

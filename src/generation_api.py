@@ -1,7 +1,9 @@
 import requests
 import os
 from datetime import datetime
+from dotenv import load_dotenv
 
+load_dotenv('C:/TOY/ecosync-project/.env')
 API_KEY=os.getenv('KPX_API_KEY')
 
 # 우리 도시 -> API 지역명 매핑
@@ -34,7 +36,7 @@ def get_solar_generation() -> list[dict]:
       data = response.json()
 
       items = data['response']['body']['items']['item']
-      current_hour = datetime.now().hour
+      current_hour = 12
 
       results = []
       for city, region in CITY_TO_REGION.items():
