@@ -1,12 +1,9 @@
 import json
 import time
-import os
-from dotenv import load_dotenv
-
 from kafka import KafkaProducer
 from kafka.errors import NoBrokersAvailable
 from generation_api import get_solar_generation
-from data_generator import generate_demand_data  # 수요는 아직 더미
+from data_generator import generate_demand_data
 
 CITY_COORDS = {
     "서울": {"lat": 37.5665, "lon": 126.9780},
@@ -16,38 +13,28 @@ CITY_COORDS = {
     "대전": {"lat": 36.3504, "lon": 127.3845},
 }
 
-load_dotenv(os.path.join(os.path.dirname(__file__), '..', '.env'))
-
 def create_producer():
     for i in range(5):
         try:
             producer = KafkaProducer(
-                bootstrap_servers=os.getenv('EVENT_HUBS_NAMESPACE') + '.servicebus.windows.net:9093',
-                security_protocol='SASL_SSL',
-                sasl_mechanism='PLAIN',
-                sasl_plain_username='$ConnectionString',
-                sasl_plain_password=os.getenv('EVENT_HUBS_CONNECTION_STRING'),
+                bootstrap_servers='kafka:9092',
                 value_serializer=lambda v: json.dumps(v).encode('utf-8')
             )
             print("Kafka 연결 성공!")
             return producer
-        except Exception as e:
-            print(f"Kafka 연결 실패 ({i+1}/5) — {str(e)}")
+        except NoBrokersAvailable:
+            print(f"Kafka 연결 실패 ({i+1}/5) — 5초 후 재시도...")
             time.sleep(5)
     raise Exception("Kafka 연결 실패 — 컨테이너 상태 확인 필요")
 
-
 producer = create_producer()
 
-
 def publish_generation_data():
-    """실제 태양광 발전량 데이터를 Kafka 토픽에 게시"""
-    data = get_solar_generation()  # 실제 API 데이터
+    data = get_solar_generation()
     if not data:
         print("발전량 API 데이터 없음 — 스킵")
         return
     for record in data:
-        # pipeline Validator가 기대하는 형식으로 변환
         formatted = {
             "id": f"kpx-{record['city']}-{record['hour']}",
             "timestamp": f"{record['trade_date']}T{record['hour']:02d}:00:00",
@@ -60,15 +47,12 @@ def publish_generation_data():
         print(f"발전량 데이터 게시: {record['city']} | {record['generation_kwh']} kWh")
     producer.flush()
 
-
 def publish_demand_data(num_records: int = 10):
-    """전력 수요 데이터를 Kafka 토픽에 게시 (더미 데이터 유지)"""
     data = generate_demand_data(num_records)
     for record in data:
         producer.send('demand', value=record)
         print(f"전력 수요 데이터 게시: {record['city']} | {record['demand_kwh']} kWh")
     producer.flush()
-
 
 if __name__ == "__main__":
     print("Kafka Producer 시작...")
