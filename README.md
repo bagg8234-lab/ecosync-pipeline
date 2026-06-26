@@ -141,6 +141,16 @@ terraform plan
 terraform apply
 ```
 
+### 파이프라인 실행 로그
+
+**Producer — Event Hubs 데이터 발행**
+
+![producer](docs/images/producer실행로그.png)
+
+**Pipeline — 검증·적재·매칭 엔진 실행**
+
+![pipeline](docs/images/pipeline실행로그.png)
+
 ### 트러블슈팅
 
 - **Event Hubs Basic 계층** → Kafka 프로토콜 미지원(`NoBrokersAvailable`) → Standard로 변경

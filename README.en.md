@@ -140,6 +140,17 @@ terraform plan
 terraform apply
 ```
 
+### Pipeline Execution Logs
+
+**Producer — Publishing data to Event Hubs**
+
+![producer](docs/images/producer실행로그.png)
+
+**Pipeline — Validation, Storage, and Matching Engine**
+
+![pipeline](docs/images/pipeline실행로그.png)
+
+
 ### Troubleshooting
 
 - **Event Hubs Basic tier** → Kafka protocol not supported (`NoBrokersAvailable`) → Upgraded to Standard
