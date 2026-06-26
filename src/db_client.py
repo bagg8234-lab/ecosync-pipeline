@@ -5,13 +5,13 @@ from dotenv import load_dotenv
 load_dotenv()
 
 def get_connection():
-    """PostgreSQL 연결"""
     return psycopg2.connect(
-        host='db',
+        host=os.getenv('DB_HOST'),
         port=5432,
         database=os.getenv('DB_NAME', 'ecosync_db'),
-        user=os.getenv('DB_USER', 'user'),
-        password=os.getenv('DB_PASSWORD', 'password')
+        user=os.getenv('DB_USER'),
+        password=os.getenv('DB_PASSWORD'),
+        sslmode='require'  # Azure PostgreSQL은 SSL 필수
     )
 
 def create_table():

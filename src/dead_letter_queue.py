@@ -1,14 +1,22 @@
 import json
+from dotenv import load_dotenv
 from kafka import KafkaProducer
 from kafka.errors import NoBrokersAvailable
 import time
+import os
+
+load_dotenv('C:/TOY/ecosync-project/.env')
 
 def create_dlq_producer():
     """Dead Letter Queue Producer 생성 """
     for i in range(5):
         try:
             producer = KafkaProducer(
-                bootstrap_servers='kafka:9092',
+                bootstrap_servers=os.getenv('EVENT_HUBS_NAMESPACE') + '.servicebus.windows.net:9093',
+                security_protocol='SASL_SSL',
+                sasl_mechanism='PLAIN',
+                sasl_plain_username='$ConnectionString',
+                sasl_plain_password=os.getenv('EVENT_HUBS_CONNECTION_STRING'),
                 value_serializer=lambda v: json.dumps(v).encode('utf-8')
             )
             print("DLQ Producer 연결 성공")

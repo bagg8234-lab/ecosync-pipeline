@@ -1,5 +1,8 @@
 import json
 import time
+import os
+from dotenv import load_dotenv
+
 from kafka import KafkaProducer
 from kafka.errors import NoBrokersAvailable
 from generation_api import get_solar_generation
@@ -13,17 +16,23 @@ CITY_COORDS = {
     "대전": {"lat": 36.3504, "lon": 127.3845},
 }
 
+load_dotenv('C:/TOY/ecosync-project/.env')
+
 def create_producer():
     for i in range(5):
         try:
             producer = KafkaProducer(
-                bootstrap_servers='kafka:9092',
+                bootstrap_servers=os.getenv('EVENT_HUBS_NAMESPACE') + '.servicebus.windows.net:9093',
+                security_protocol='SASL_SSL',
+                sasl_mechanism='PLAIN',
+                sasl_plain_username='$ConnectionString',
+                sasl_plain_password=os.getenv('EVENT_HUBS_CONNECTION_STRING'),
                 value_serializer=lambda v: json.dumps(v).encode('utf-8')
             )
             print("Kafka 연결 성공!")
             return producer
-        except NoBrokersAvailable:
-            print(f"Kafka 연결 실패 ({i+1}/5) — 5초 후 재시도...")
+        except Exception as e:
+            print(f"Kafka 연결 실패 ({i+1}/5) — {str(e)}")
             time.sleep(5)
     raise Exception("Kafka 연결 실패 — 컨테이너 상태 확인 필요")
 
