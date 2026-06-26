@@ -16,7 +16,7 @@ CITY_COORDS = {
     "대전": {"lat": 36.3504, "lon": 127.3845},
 }
 
-load_dotenv('C:/TOY/ecosync-project/.env')
+load_dotenv(os.path.join(os.path.dirname(__file__), '..', '.env'))
 
 def create_producer():
     for i in range(5):
