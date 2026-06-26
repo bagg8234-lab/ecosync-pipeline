@@ -1,6 +1,7 @@
 import json
 import time
 import os
+from dotenv import load_dotenv
 from kafka import KafkaConsumer
 from kafka.errors import NoBrokersAvailable
 from validator import validate_generation, validate_demand
@@ -9,6 +10,7 @@ from matching_engine import match_generation_to_demand, save_trades
 from db_client import upsert_generation, upsert_demand, create_table
 from minio_client import create_storage_client, create_bucket, upload_raw_data
 
+load_dotenv('C:/TOY/ecosync-project/.env')
 
 def create_consumer(topics: list[str]):
     """Kafka Consumer 생성 (재시도 로직 포함)"""

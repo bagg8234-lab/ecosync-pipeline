@@ -1,6 +1,8 @@
 import json
 import time
 import os
+from dotenv import load_dotenv
+
 from kafka import KafkaProducer
 from kafka.errors import NoBrokersAvailable
 from generation_api import get_solar_generation
@@ -13,6 +15,8 @@ CITY_COORDS = {
     "대구": {"lat": 35.8722, "lon": 128.6025},
     "대전": {"lat": 36.3504, "lon": 127.3845},
 }
+
+load_dotenv('C:/TOY/ecosync-project/.env')
 
 def create_producer():
     for i in range(5):
@@ -27,8 +31,8 @@ def create_producer():
             )
             print("Kafka 연결 성공!")
             return producer
-        except NoBrokersAvailable:
-            print(f"Kafka 연결 실패 ({i+1}/5) — 5초 후 재시도...")
+        except Exception as e:
+            print(f"Kafka 연결 실패 ({i+1}/5) — {str(e)}")
             time.sleep(5)
     raise Exception("Kafka 연결 실패 — 컨테이너 상태 확인 필요")
 

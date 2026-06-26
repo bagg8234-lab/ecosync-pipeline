@@ -1,8 +1,11 @@
 import json
+from dotenv import load_dotenv
 from kafka import KafkaProducer
 from kafka.errors import NoBrokersAvailable
 import time
 import os
+
+load_dotenv('C:/TOY/ecosync-project/.env')
 
 def create_dlq_producer():
     """Dead Letter Queue Producer 생성 """
