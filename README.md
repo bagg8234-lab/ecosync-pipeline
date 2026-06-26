@@ -3,7 +3,16 @@
 **🌐 Language:** [한국어](README.md) | [English](README.en.md)
 
 재생에너지(태양광) 프로슈머와 수요처 간의 실시간 에너지 거래를 중개하고,  
-데이터를 수집·검증·매칭하여 에너지 효율을 최적화하는 서버리스 데이터 파이프라인입니다.
+데이터를 수집·검증·매칭하여 에너지 효율을 최적화하는 데이터 파이프라인입니다.
+
+---
+
+## 브랜치 구조
+
+| 브랜치 | 환경 | 설명 |
+| :--- | :--- | :--- |
+| `main` | 로컬 (Docker) | Kafka + MinIO + PostgreSQL |
+| `azure` | 클라우드 (Azure) | Event Hubs + ADLS Gen2 + Azure PostgreSQL |
 
 ---
 
@@ -51,12 +60,10 @@
 
 | 분류 | 로컬 (Docker) | 클라우드 (Azure) |
 | :--- | :--- | :--- |
-| Orchestrator | Python 스크립트 | Azure Data Factory |
-| Compute | Docker (Python 3.12-alpine) | Azure Functions |
-| Message Broker | Kafka + Kafka UI | Azure Event Hubs |
+| Message Broker | Kafka + Kafka UI | Azure Event Hubs (Kafka 호환) |
 | Storage | MinIO (S3 호환) | ADLS Gen2 |
-| Database | PostgreSQL v16-alpine | Azure SQL Database |
-| Visualization | Streamlit / Tableau | Power BI |
+| Database | PostgreSQL v16 | Azure Database for PostgreSQL |
+| Visualization | Streamlit / Tableau | Streamlit + Power BI |
 | IaC | Docker Compose | Terraform |
 
 ---
@@ -66,8 +73,8 @@
 **1. 데이터 무결성 검증**
 - Pydantic — 타입/범위/필수값 검증 (음수 발전량, null 차단)
 - Great Expectations — 통계적 이상치 감지 (전체 분포 검증)
-- 검증 실패 데이터 → `data_error`로 DLQ 격리 (수동 확인 대상)
-- DB/MinIO 오류 → `system_error`로 DLQ 격리 (자동 재처리 대상)
+- 검증 실패 데이터 → `data_error` DLQ 격리 (수동 확인)
+- DB/Storage 오류 → `system_error` DLQ 격리 (자동 재처리)
 - DLQ 재처리 — Cron으로 매 1시간마다 `system_error`만 자동 재처리
 
 **2. 실시간 거래 매칭 엔진**
@@ -90,14 +97,54 @@
 
 ## 데이터베이스 스키마
 
-![db](docs/images/db.png)
+![erd](docs/images/erd.png)
 
 | 테이블 | 역할 |
 | :--- | :--- |
-| `generation` | 태양광 발전량 원본 데이터 적재 |
-| `demand` | 수요량 데이터 적재 |
+| `generation` | 태양광 발전량 원본 데이터 |
+| `demand` | 수요량 데이터 |
 | `trades` | 매칭 성공 거래 내역 |
-| `matching_errors` | 매칭 실패 로그 분리 적재 |
+| `matching_errors` | 매칭 실패 로그 |
+
+---
+
+## Azure 이전 (azure 브랜치)
+
+로컬 Docker 환경을 Azure 클라우드로 이전한 버전입니다.  
+`.env` 연결 설정만 교체하면 동일한 코드로 동작합니다.  
+Azure 리소스는 Terraform으로 프로비저닝합니다.
+
+### Azure 리소스
+
+**Event Hubs** — Kafka 호환 메시지 브로커 (generation / demand / dead-letter)
+
+![eventhub](docs/images/eventhub.png)
+
+**Event Hubs 모니터링** — 실시간 메시지 처리 현황
+
+![eventhubs](docs/images/eventhubs.png)
+
+**ADLS Gen2** — 원본 데이터 레이크 (demand / generation 날짜별 적재)
+
+![storage](docs/images/storage.png)
+
+**Azure Database for PostgreSQL**
+
+![db](docs/images/db.png)
+
+### 인프라 (Terraform)
+
+```bash
+cd terraform
+terraform init
+terraform plan
+terraform apply
+```
+
+### 트러블슈팅
+
+- **Event Hubs Basic 계층** → Kafka 프로토콜 미지원(`NoBrokersAvailable`) → Standard로 변경
+- **DLQ 무한 루프** → data_error / system_error 분류로 해결
 
 ---
 
@@ -105,71 +152,84 @@
 
 ```
 ecosync-project/
-├── .env.example            # 환경 변수 샘플
-├── docker-compose.yml      # 인프라 정의
-├── Dockerfile              # 앱 컨테이너 빌드
-├── requirements.txt        # 파이썬 라이브러리
-├── logs/                   # 로그 파일
-│   └── dlq.log             # DLQ 재처리 로그
+├── .env.example
+├── docker-compose.yml
+├── Dockerfile
+├── requirements.txt
+├── terraform/              ← Azure 인프라 IaC
+│   ├── main.tf
+│   └── variables.tf
+├── logs/
+│   └── dlq.log
 ├── docs/
-│   └── images/             # 스크린샷
+│   └── images/
 └── src/
-    ├── data_generator.py   # 더미 데이터 생성 (수요량)
-    ├── kafka_producer.py   # Kafka 발행
-    ├── kafka_consumer.py   # Kafka 수신 (테스트용)
-    ├── validator.py        # Pydantic 검증
-    ├── ge_validator.py     # Great Expectations 검증
-    ├── dead_letter_queue.py # DLQ 격리
-    ├── dlq_reprocessor.py  # DLQ 재처리 (Cron)
-    ├── minio_client.py     # MinIO 적재
-    ├── db_client.py        # PostgreSQL UPSERT
-    ├── matching_engine.py  # 거래 매칭
-    ├── weather_api.py      # 기상청 일사량 API
-    ├── smp_api.py          # KPX SMP API
-    ├── generation_api.py   # KPX 발전량 API
-    ├── dynamic_pricing.py  # 가격 산출
-    ├── pipeline.py         # End-to-End 파이프라인
-    └── dashboard.py        # Streamlit 대시보드
+    ├── data_generator.py
+    ├── kafka_producer.py
+    ├── kafka_consumer.py
+    ├── validator.py
+    ├── ge_validator.py
+    ├── dead_letter_queue.py
+    ├── dlq_reprocessor.py
+    ├── minio_client.py
+    ├── db_client.py
+    ├── matching_engine.py
+    ├── weather_api.py
+    ├── smp_api.py
+    ├── generation_api.py
+    ├── dynamic_pricing.py
+    ├── pipeline.py
+    └── dashboard.py
 ```
 
 ---
 
 ## 실행 방법
 
-### 1. 환경 변수 설정
+### 로컬 (Docker)
 
 ```bash
 cp .env.example .env
-# .env 파일에 API 키 입력
-```
-
-### 2. 인프라 실행
-
-```bash
 docker-compose up -d
 ```
 
-### 3. 파이프라인 실행
-
-터미널 1 — 파이프라인:
+터미널 1:
 ```bash
 docker exec -it ecosync-app python src/pipeline.py
 ```
 
-터미널 2 — 데이터 발행:
+터미널 2:
 ```bash
 docker exec -it ecosync-app python src/kafka_producer.py
 ```
 
-### 4. 대시보드 실행
-
+대시보드:
 ```bash
 docker exec -it ecosync-app streamlit run src/dashboard.py --server.address=0.0.0.0
 ```
 
-브라우저에서 `http://localhost:8501` 접속
+Kafka UI: `http://localhost:8080`  
+Streamlit: `http://localhost:8501`
 
-### 5. Kafka UI
+### Azure (azure 브랜치)
 
-브라우저에서 `http://localhost:8080` 접속  
-토픽 메시지, Consumer 그룹, 브로커 상태 모니터링 가능
+```bash
+git checkout azure
+cp .env.example .env
+# .env에 Azure 연결 정보 입력
+```
+
+터미널 1:
+```bash
+python src/pipeline.py
+```
+
+터미널 2:
+```bash
+python src/kafka_producer.py
+```
+
+DLQ 재처리:
+```bash
+python src/dlq_reprocessor.py
+```

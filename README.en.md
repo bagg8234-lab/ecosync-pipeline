@@ -2,7 +2,16 @@
 
 **🌐 Language:** [한국어](README.md) | [English](README.en.md)
 
-A serverless data pipeline that brokers real-time energy trading between solar energy prosumers and consumers, optimizing energy efficiency through data collection, validation, and matching.
+A data pipeline that brokers real-time energy trading between solar energy prosumers and consumers, optimizing energy efficiency through data collection, validation, and matching.
+
+---
+
+## Branch Structure
+
+| Branch | Environment | Description |
+| :--- | :--- | :--- |
+| `main` | Local (Docker) | Kafka + MinIO + PostgreSQL |
+| `azure` | Cloud (Azure) | Event Hubs + ADLS Gen2 + Azure PostgreSQL |
 
 ---
 
@@ -32,16 +41,16 @@ A serverless data pipeline that brokers real-time energy trading between solar e
    [Validator]         ← Pydantic + Great Expectations
    ↙              ↘
 [data_error DLQ]   [PostgreSQL + MinIO]
-(Manual review)  ↙         ↘
+(Manual Review)  ↙         ↘
            Success     [system_error DLQ]
-                             ↓
-                     [DLQ Reprocessor]  ← Cron (every 1 hour)
-                             ↓
-                      [Matching Engine]  ← Haversine distance-based
-                             ↓
-                      [Dynamic Pricing]  ← Weather API + KPX SMP
-                             ↓
-                    [Streamlit Dashboard]
+                            ↓
+                    [DLQ Reprocessor]  ← Cron (every 1 hour)
+                            ↓
+                    [Matching Engine]  ← Haversine distance-based
+                            ↓
+                    [Dynamic Pricing]  ← Weather API + KPX SMP
+                            ↓
+                   [Streamlit Dashboard]
 ```
 
 ---
@@ -50,12 +59,10 @@ A serverless data pipeline that brokers real-time energy trading between solar e
 
 | Category | Local (Docker) | Cloud (Azure) |
 | :--- | :--- | :--- |
-| Orchestrator | Python Script | Azure Data Factory |
-| Compute | Docker (Python 3.12-alpine) | Azure Functions |
-| Message Broker | Kafka + Kafka UI | Azure Event Hubs |
+| Message Broker | Kafka + Kafka UI | Azure Event Hubs (Kafka-compatible) |
 | Storage | MinIO (S3-compatible) | ADLS Gen2 |
-| Database | PostgreSQL v16-alpine | Azure SQL Database |
-| Visualization | Streamlit / Tableau | Power BI |
+| Database | PostgreSQL v16 | Azure Database for PostgreSQL |
+| Visualization | Streamlit / Tableau | Streamlit + Power BI |
 | IaC | Docker Compose | Terraform |
 
 ---
@@ -64,10 +71,10 @@ A serverless data pipeline that brokers real-time energy trading between solar e
 
 **1. Data Integrity Validation**
 - Pydantic — Type/range/required field validation (negative generation, null values)
-- Great Expectations — Statistical anomaly detection (distribution validation)
-- Validation failure → isolated to DLQ as `data_error` (requires manual review)
-- DB/MinIO failure → isolated to DLQ as `system_error` (auto-retry target)
-- DLQ Reprocessor — Cron retries only `system_error` messages every 1 hour
+- Great Expectations — Statistical anomaly detection
+- Failed validation → `data_error` DLQ isolation (manual review)
+- DB/Storage errors → `system_error` DLQ isolation (auto retry)
+- DLQ Reprocessor — Only `system_error` retried automatically via Cron
 
 **2. Real-time Trade Matching Engine**
 - Distance calculation using Haversine formula
@@ -89,14 +96,54 @@ A serverless data pipeline that brokers real-time energy trading between solar e
 
 ## Database Schema
 
-![db](docs/images/db.png)
+![erd](docs/images/erd.png)
 
 | Table | Description |
 | :--- | :--- |
-| `generation` | Raw solar generation data |
+| `generation` | Solar generation raw data |
 | `demand` | Demand data |
-| `trades` | Successful trade records |
-| `matching_errors` | Failed match log stored separately |
+| `trades` | Matched trade records |
+| `matching_errors` | Failed match logs |
+
+---
+
+## Azure Migration (azure branch)
+
+Migrated from local Docker to Azure cloud.  
+Only `.env` connection settings need to be changed — no code modifications required.  
+Azure resources are provisioned via Terraform.
+
+### Azure Resources
+
+**Event Hubs** — Kafka-compatible message broker (generation / demand / dead-letter)
+
+![eventhub](docs/images/eventhub.png)
+
+**Event Hubs Monitoring** — Real-time message throughput
+
+![eventhubs](docs/images/eventhubs.png)
+
+**ADLS Gen2** — Raw data lake (demand / generation stored by date)
+
+![storage](docs/images/storage.png)
+
+**Azure Database for PostgreSQL**
+
+![db](docs/images/db.png)
+
+### Infrastructure (Terraform)
+
+```bash
+cd terraform
+terraform init
+terraform plan
+terraform apply
+```
+
+### Troubleshooting
+
+- **Event Hubs Basic tier** → Kafka protocol not supported (`NoBrokersAvailable`) → Upgraded to Standard
+- **DLQ infinite loop** → Resolved by classifying `data_error` vs `system_error`
 
 ---
 
@@ -104,71 +151,84 @@ A serverless data pipeline that brokers real-time energy trading between solar e
 
 ```
 ecosync-project/
-├── .env.example            # Environment variable template
-├── docker-compose.yml      # Infrastructure definition
-├── Dockerfile              # App container build
-├── requirements.txt        # Python libraries
+├── .env.example
+├── docker-compose.yml
+├── Dockerfile
+├── requirements.txt
+├── terraform/              ← Azure IaC
+│   ├── main.tf
+│   └── variables.tf
 ├── logs/
-│   └── dlq.log             # DLQ reprocessor log
+│   └── dlq.log
 ├── docs/
-│   └── images/             # Screenshots
+│   └── images/
 └── src/
-    ├── data_generator.py   # Dummy data generation (demand)
-    ├── kafka_producer.py   # Kafka publisher
-    ├── kafka_consumer.py   # Kafka consumer (for testing)
-    ├── validator.py        # Pydantic validation
-    ├── ge_validator.py     # Great Expectations validation
-    ├── dead_letter_queue.py # DLQ isolation
-    ├── dlq_reprocessor.py  # DLQ reprocessor (Cron)
-    ├── minio_client.py     # MinIO storage
-    ├── db_client.py        # PostgreSQL UPSERT
-    ├── matching_engine.py  # Trade matching
-    ├── weather_api.py      # KMA Weather API
-    ├── smp_api.py          # KPX SMP API
-    ├── generation_api.py   # KPX Generation API
-    ├── dynamic_pricing.py  # Price calculation
-    ├── pipeline.py         # End-to-End pipeline
-    └── dashboard.py        # Streamlit dashboard
+    ├── data_generator.py
+    ├── kafka_producer.py
+    ├── kafka_consumer.py
+    ├── validator.py
+    ├── ge_validator.py
+    ├── dead_letter_queue.py
+    ├── dlq_reprocessor.py
+    ├── minio_client.py
+    ├── db_client.py
+    ├── matching_engine.py
+    ├── weather_api.py
+    ├── smp_api.py
+    ├── generation_api.py
+    ├── dynamic_pricing.py
+    ├── pipeline.py
+    └── dashboard.py
 ```
 
 ---
 
 ## Getting Started
 
-### 1. Set up environment variables
+### Local (Docker)
 
 ```bash
 cp .env.example .env
-# Add your API keys to .env
-```
-
-### 2. Start infrastructure
-
-```bash
 docker-compose up -d
 ```
 
-### 3. Run pipeline
-
-Terminal 1 — Pipeline:
+Terminal 1:
 ```bash
 docker exec -it ecosync-app python src/pipeline.py
 ```
 
-Terminal 2 — Data publishing:
+Terminal 2:
 ```bash
 docker exec -it ecosync-app python src/kafka_producer.py
 ```
 
-### 4. Run dashboard
-
+Dashboard:
 ```bash
 docker exec -it ecosync-app streamlit run src/dashboard.py --server.address=0.0.0.0
 ```
 
-Open `http://localhost:8501` in your browser
+Kafka UI: `http://localhost:8080`  
+Streamlit: `http://localhost:8501`
 
-### 5. Kafka UI
+### Azure (azure branch)
 
-Open `http://localhost:8080` in your browser  
-Monitor topic messages, consumer groups, and broker status
+```bash
+git checkout azure
+cp .env.example .env
+# Add Azure connection info to .env
+```
+
+Terminal 1:
+```bash
+python src/pipeline.py
+```
+
+Terminal 2:
+```bash
+python src/kafka_producer.py
+```
+
+DLQ Reprocessor:
+```bash
+python src/dlq_reprocessor.py
+```
