@@ -1,22 +1,14 @@
 import json
-from dotenv import load_dotenv
 from kafka import KafkaProducer
 from kafka.errors import NoBrokersAvailable
 import time
-import os
-
-load_dotenv('C:/TOY/ecosync-project/.env')
 
 def create_dlq_producer():
-    """Dead Letter Queue Producer 생성 """
+    """Dead Letter Queue Producer 생성"""
     for i in range(5):
         try:
             producer = KafkaProducer(
-                bootstrap_servers=os.getenv('EVENT_HUBS_NAMESPACE') + '.servicebus.windows.net:9093',
-                security_protocol='SASL_SSL',
-                sasl_mechanism='PLAIN',
-                sasl_plain_username='$ConnectionString',
-                sasl_plain_password=os.getenv('EVENT_HUBS_CONNECTION_STRING'),
+                bootstrap_servers='kafka:9092',
                 value_serializer=lambda v: json.dumps(v).encode('utf-8')
             )
             print("DLQ Producer 연결 성공")
@@ -34,9 +26,9 @@ def send_to_dlq(data: dict, reason: str, data_type: str, error_type: str = "data
     - data: 검증 실패한 데이터
     - reason: 실패 사유
     - data_type: 데이터 유형 (예: 'generation', 'demand')
-    - error_tyoe: 오류 유형
-        - 'data_error'  : 데이터 자체 오류 (음수 발전량, null 도시명 등) -> 재처리해도 실패
-        - 'system_error': 일시적 장애 (DB 연결 끊김, MinIO 오류 등) -> 복구 후 재처리 가능 
+    - error_type: 오류 유형
+        - 'data_error'  : 데이터 자체 오류 (음수 발전량, null 도시명 등) → 재처리해도 실패
+        - 'system_error': 일시적 장애 (DB 연결 끊김, MinIO 오류 등) → 복구 후 재처리 가능
     """
     dlq_message = {
         "original_data": data,
