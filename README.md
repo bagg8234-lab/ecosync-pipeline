@@ -141,6 +141,13 @@ terraform plan
 terraform apply
 ```
 
+### Power BI 대시보드
+
+Azure PostgreSQL 데이터를 Power BI Desktop으로 연결하여 운영 현황을 시각화합니다.
+
+![powerbi](docs/images/powerbi.png)
+
+
 ### 파이프라인 실행 로그
 
 **Producer — Event Hubs 데이터 발행**

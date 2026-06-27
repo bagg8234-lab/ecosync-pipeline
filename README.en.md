@@ -6,6 +6,20 @@ A data pipeline that brokers real-time energy trading between solar energy prosu
 
 ---
 
+## Design Philosophy
+
+Built on a **Local Validation → Cloud Migration** strategy.
+
+1. **Environment Independence** — Docker ensures identical execution regardless of OS
+2. **Logic First** — Fully validate pipeline logic with small datasets before moving to cloud
+3. **Zero Code Change Migration** — Only `.env` connection settings change between local and Azure
+4. **Infrastructure as Code** — Terraform manages Azure resources for reproducible environments
+
+> Running cloud resources with flawed logic is wasteful.  
+> Validate locally first, then deploy the proven code to the cloud.
+
+---
+
 ## Branch Structure
 
 | Branch | Environment | Description |
@@ -140,6 +154,12 @@ terraform plan
 terraform apply
 ```
 
+### Power BI Dashboard
+
+Connected Power BI Desktop to Azure PostgreSQL for operational monitoring.
+
+![powerbi](docs/images/powerbi.png)
+
 ### Pipeline Execution Logs
 
 **Producer — Publishing data to Event Hubs**
@@ -149,7 +169,6 @@ terraform apply
 **Pipeline — Validation, Storage, and Matching Engine**
 
 ![pipeline](docs/images/pipeline실행로그.png)
-
 
 ### Troubleshooting
 
