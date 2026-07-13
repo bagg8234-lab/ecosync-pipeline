@@ -44,27 +44,39 @@ Built on a **Local Validation → Cloud Migration** strategy.
 ## Architecture
 
 ```
-[KPX Real Generation API]     [Demand Dummy Data]
-        ↓                            ↓
-   [Kafka Producer]─────────────────┘
+[KPX Solar Generation API]     [Demand Dummy Data]
+        ↓                        ↓
+   [Kafka Producer]──────────────┘
         ↓
-      [Kafka]          ← Real-time message queue
+      [Kafka]  (generation / demand topics)
         ↓
   [Pipeline Consumer]
         ↓
-   [Validator]         ← Pydantic + Great Expectations
+   [Pydantic]          ← Individual record validation (type/range/required fields)
    ↙              ↘
-[data_error DLQ]   [PostgreSQL + MinIO]
-(Manual Review)  ↙         ↘
-           Success     [system_error DLQ]
-                            ↓
-                    [DLQ Reprocessor]  ← Cron (every 1 hour)
-                            ↓
-                    [Matching Engine]  ← Haversine distance-based
-                            ↓
-                    [Dynamic Pricing]  ← Weather API + KPX SMP
-                            ↓
-                   [Streamlit Dashboard]
+[data_error DLQ]   [Buffer accumulation (batches of 10)]
+(manual review)          ↓
+                   [Great Expectations]  ← Batch-level statistical validation (distribution/outliers)
+                   ↙              ↘
+            [data_error DLQ]   [PostgreSQL + MinIO]
+            (manual review)          ↓
+                                [Matching Engine]      ← Haversine distance-based
+                                     ↓
+                            [Dynamic Pricing]  ← KMA weather API + KPX SMP
+                                     ↓
+                           [Streamlit Dashboard]
+
+     ┌─────────────────────────────────────────────────┐
+     │      [DLQ Reprocessor] ← Cron (hourly, on the hour) │
+     │   Consumes the dead-letter topic                  │
+     │   ├─ error_type = data_error  → Skip (log only)   │
+     │   └─ error_type = system_error → Revalidate (Pydantic)│
+     │        └─ On pass, republish to original topic     │
+     │           (generation/demand) → back to Kafka       │
+     │              (re-enters pipeline from the start)   │
+     └─────────────────────────────────────────────────┘
+
+[DB/MinIO write failure] → [system_error DLQ] → (absorbed by the DLQ Reprocessor above)
 ```
 
 ---
@@ -84,11 +96,11 @@ Built on a **Local Validation → Cloud Migration** strategy.
 ## Key Features
 
 **1. Data Integrity Validation**
-- Pydantic — Type/range/required field validation (negative generation, null values)
-- Great Expectations — Statistical anomaly detection
-- Failed validation → `data_error` DLQ isolation (manual review)
-- DB/Storage errors → `system_error` DLQ isolation (auto retry)
-- DLQ Reprocessor — Only `system_error` retried automatically via Cron
+- **Stage 1 (per-record)** Pydantic — Type/range/required field validation (negative generation, null values)
+- **Stage 2 (batch of 10)** Great Expectations — Statistical anomaly detection across the full distribution (can catch records that already passed Pydantic)
+- Failed validation at either stage → `data_error` DLQ isolation (manual review, no retry)
+- DB/Storage errors → `system_error` DLQ isolation
+- DLQ Reprocessor — runs hourly via Cron; only `system_error` records are revalidated and republished to their original topic, re-entering the pipeline from the start (`data_error` records are skipped)
 
 **2. Real-time Trade Matching Engine**
 - Distance calculation using Haversine formula
