@@ -49,23 +49,35 @@
         ↓                        ↓
    [Kafka Producer]──────────────┘
         ↓
-      [Kafka]          ← 실시간 데이터 대기줄
+      [Kafka]  (generation / demand 토픽)
         ↓
   [Pipeline Consumer]
         ↓
-   [Validator]         ← Pydantic + Great Expectations
+   [Pydantic]          ← 개별 레코드 검증 (타입/범위/필수값)
    ↙              ↘
-[data_error DLQ]   [PostgreSQL + MinIO]
-(수동 확인)      ↙         ↘
-           성공        [system_error DLQ]
-                            ↓
-                    [DLQ Reprocessor]  ← Cron (매 1시간)
-                            ↓
-                      [매칭 엔진]      ← Haversine 거리 기반
-                            ↓
-                    [Dynamic Pricing]  ← 기상청 API + KPX SMP
-                            ↓
-                   [Streamlit 대시보드]
+[data_error DLQ]   [버퍼 적재 (10개 단위)]
+(수동 확인 대상)         ↓
+                   [Great Expectations]  ← 배치 통계 검증 (분포/이상치)
+                   ↙              ↘
+            [data_error DLQ]   [PostgreSQL + MinIO]
+            (수동 확인 대상)          ↓
+                                [매칭 엔진]      ← Haversine 거리 기반
+                                     ↓
+                            [Dynamic Pricing]  ← 기상청 API + KPX SMP
+                                     ↓
+                           [Streamlit 대시보드]
+
+     ┌─────────────────────────────────────────────┐
+     │         [DLQ Reprocessor] ← Cron (매시 정각)  │
+     │   dead-letter 토픽 소비                        │
+     │   ├─ error_type = data_error  → 스킵 (로그만)  │
+     │   └─ error_type = system_error → 재검증(Pydantic)│
+     │        └─ 통과 시 원래 토픽(generation/demand)  │
+     │           으로 재발행 → Kafka로 복귀            │
+     │              (파이프라인 처음부터 재진입)        │
+     └─────────────────────────────────────────────┘
+
+[DB/MinIO 저장 실패] → [system_error DLQ] → (위 DLQ Reprocessor가 흡수)
 ```
 
 ---
@@ -85,11 +97,11 @@
 ## 주요 기능
 
 **1. 데이터 무결성 검증**
-- Pydantic — 타입/범위/필수값 검증 (음수 발전량, null 차단)
-- Great Expectations — 통계적 이상치 감지 (전체 분포 검증)
-- 검증 실패 데이터 → `data_error` DLQ 격리 (수동 확인)
-- DB/Storage 오류 → `system_error` DLQ 격리 (자동 재처리)
-- DLQ 재처리 — Cron으로 매 1시간마다 `system_error`만 자동 재처리
+- **1단계 (레코드 단위)** Pydantic — 타입/범위/필수값 즉시 검증 (음수 발전량, null 차단)
+- **2단계 (배치 단위, 10개 적재 시)** Great Expectations — 전체 분포 기준 통계적 이상치 감지 (Pydantic 통과분도 여기서 추가로 걸러질 수 있음)
+- 두 단계 중 어디서든 검증 실패 → `data_error` DLQ 격리 (수동 확인 대상, 재처리 없이 로그만 남김)
+- DB/MinIO 저장 과정의 인프라 오류 → `system_error` DLQ 격리
+- DLQ 재처리 — `dlq-reprocessor` 컨테이너가 Cron으로 매시 정각 실행, `system_error`만 재검증 후 원래 Kafka 토픽으로 재발행하여 파이프라인을 처음부터 다시 통과시킴 (`data_error`는 스킵)
 
 **2. 실시간 거래 매칭 엔진**
 - Haversine 공식으로 위도/경도 거리 계산
