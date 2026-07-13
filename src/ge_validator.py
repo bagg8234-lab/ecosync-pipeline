@@ -43,7 +43,37 @@ def validate_generation_stats(data: list[dict]) -> tuple[bool, list, object]:
     ]
     return success, failures, results
 
+def validate_demand_stats(data: list[dict]) -> tuple[bool, list, object]:
+    """
+    Great Expectations로 소비량 데이터 통계 검증
+    """
+    df = pd.DataFrame(data)
 
+    context = gx.get_context(mode="ephemeral")
+
+    datasource = context.sources.add_pandas("pandas_source_demand")
+    data_asset = datasource.add_dataframe_asset("demand_asset")
+    batch_request = data_asset.build_batch_request(dataframe=df)
+
+    context.add_or_update_expectation_suite("demand_suite")
+    validator = context.get_validator(
+        batch_request=batch_request,
+        expectation_suite_name="demand_suite"
+    )
+
+    validator.expect_column_values_to_be_between(
+        column="demand_kwh",
+        min_value=0,
+        max_value=10000
+    )
+    validator.expect_column_values_to_not_be_null(column="demand_kwh")
+    validator.expect_column_values_to_not_be_null(column="city")
+
+    results = validator.validate()
+    success = results.success
+    failures = [str(r) for r in results.results if not r.success]
+    return success, failures, results
+    
 def save_html_report(results, report_path: str = "/app/logs/ge_report.html"):
     """검증 결과를 HTML 리포트로 저장"""
     report_data = []
