@@ -52,18 +52,19 @@ def process_ge_batch(pydantic_buffer: list, data_type: str, minio_client, target
         return
 
     if data_type == 'generation':
-        ge_success, ge_failures = validate_generation_stats(pydantic_buffer)
+        ge_success, ge_failures, ge_results = validate_generation_stats(pydantic_buffer)
     else:
-        ge_success, ge_failures = validate_demand_stats(pydantic_buffer)
+        ge_success, ge_failures, ge_results = validate_demand_stats(pydantic_buffer)
 
     if ge_success:
         clean_records = pydantic_buffer
         rejected = []
     else:
-        # GE가 잡아낸 이상치 값들 
+        # GE가 잡아낸 이상치 값들
         unexpected_values = set()
-        for failure in ge_failures:
-            unexpected_values.update(failure.result.get("partial_unexpected_list", []))
+        for r in ge_results.results:                                          
+            if not r.success:
+                unexpected_values.update(r.result.get("partial_unexpected_list", []))
 
         clean_records, rejected = [], []
         value_key = 'generation_kwh' if data_type == 'generation' else 'demand_kwh'
