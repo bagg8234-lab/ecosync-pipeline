@@ -1,5 +1,7 @@
 import json
 import time
+import psycopg2
+from botocore.exceptions import ConnectionError as MinioConnectionError
 from kafka import KafkaConsumer
 from kafka.errors import NoBrokersAvailable
 from validator import validate_generation, validate_demand
@@ -51,10 +53,17 @@ def process_ge_batch(pydantic_buffer: list, data_type: str, minio_client, target
     if not pydantic_buffer:
         return
 
-    if data_type == 'generation':
-        ge_success, ge_failures, ge_results = validate_generation_stats(pydantic_buffer)
-    else:
-        ge_success, ge_failures, ge_results = validate_demand_stats(pydantic_buffer)
+    try:
+        if data_type == 'generation':
+            ge_success, ge_failures, ge_results = validate_generation_stats(pydantic_buffer)
+        else:
+            ge_success, ge_failures, ge_results = validate_demand_stats(pydantic_buffer)
+    except Exception as e:
+        # GE 실행 자체가 실패(환경/리소스 문제 등) → 일시적 문제이므로 재처리 시 복구 가능
+        for record in pydantic_buffer:
+            send_to_dlq(record, f"GE 검증 실행 실패: {str(e)}", data_type, error_type="system_error")
+        print(f"❌ {data_type} DLQ [system_error]: GE 실행 오류 | {str(e)[:50]}")
+        return
 
     if ge_success:
         clean_records = pydantic_buffer
@@ -84,15 +93,27 @@ def process_ge_batch(pydantic_buffer: list, data_type: str, minio_client, target
                 upsert_generation(record)
             else:
                 upsert_demand(record)
+        except psycopg2.OperationalError as e:
+            # 실제 DB 연결 장애 → 일시적 문제이므로 재처리 시 복구 가능
+            send_to_dlq(record, f"DB 연결 실패: {str(e)}", data_type, error_type="system_error")
+            print(f"❌ {data_type} DLQ [system_error]: DB 연결 오류 | {str(e)[:50]}")
+            continue
         except Exception as e:
-            send_to_dlq(record, f"DB 저장 실패: {str(e)}", data_type, error_type="system_error")
-            print(f"❌ {data_type} DLQ [system_error]: DB 오류 | {str(e)[:50]}")
+            # 제약 조건 위반(IntegrityError) 등 데이터 자체 문제 → 재처리해도 동일하게 실패
+            send_to_dlq(record, f"DB 저장 실패: {str(e)}", data_type, error_type="data_error")
+            print(f"❌ {data_type} DLQ [data_error]: DB 오류 | {str(e)[:50]}")
             continue
         try:
             upload_raw_data(minio_client, [record], data_type)
+        except MinioConnectionError as e:
+            # 실제 MinIO 연결/네트워크 장애 → 일시적 문제이므로 재처리 시 복구 가능
+            send_to_dlq(record, f"MinIO 연결 실패: {str(e)}", data_type, error_type="system_error")
+            print(f"❌ {data_type} DLQ [system_error]: MinIO 연결 오류 | {str(e)[:50]}")
+            continue
         except Exception as e:
-            send_to_dlq(record, f"MinIO 저장 실패: {str(e)}", data_type, error_type="system_error")
-            print(f"❌ {data_type} DLQ [system_error]: MinIO 오류 | {str(e)[:50]}")
+            # 버킷/권한 등 요청 자체가 거부된 경우 → 재처리해도 동일하게 실패
+            send_to_dlq(record, f"MinIO 저장 실패: {str(e)}", data_type, error_type="data_error")
+            print(f"❌ {data_type} DLQ [data_error]: MinIO 오류 | {str(e)[:50]}")
             continue
         target_buffer.append(record)
         print(f"✅ {data_type} 최종 저장: {record.get('city')}")
