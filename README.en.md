@@ -76,7 +76,17 @@ Built on a **Local Validation → Cloud Migration** strategy.
      │              (re-enters pipeline from the start)   │
      └─────────────────────────────────────────────────┘
 
-[DB/MinIO write failure] → [system_error DLQ] → (absorbed by the DLQ Reprocessor above)
+[DB/Storage write failure]
+   ↙                                  ↘
+Connection error                   Other (constraint violations, etc.)
+(OperationalError,                 (NotNullViolation,
+ EndpointConnectionError)           ClientError, etc.)
+   ↓                                    ↓
+[system_error DLQ]                [data_error DLQ]
+(absorbed by the DLQ                (manual review)
+ Reprocessor above)
+
+[GE validation execution failure] → [system_error DLQ] (entire batch of records)
 ```
 
 ---
@@ -99,7 +109,11 @@ Built on a **Local Validation → Cloud Migration** strategy.
 - **Stage 1 (per-record)** Pydantic — Type/range/required field validation (negative generation, null values)
 - **Stage 2 (batch of 10)** Great Expectations — Statistical anomaly detection across the full distribution (can catch records that already passed Pydantic)
 - Failed validation at either stage → `data_error` DLQ isolation (manual review, no retry)
-- DB/Storage errors → `system_error` DLQ isolation
+- **Stage 3 (storage)** DB/Storage write failures are classified by exception type
+  - Connection errors (`psycopg2.OperationalError`, `botocore.EndpointConnectionError`) → recoverable on retry, so classified as `system_error`
+  - Other exceptions (`NotNullViolation`, `ClientError`, etc. — constraint or configuration issues) → will fail identically on retry, so classified as `data_error`
+  - If the GE validation call itself fails (environment/resource issue), the entire batch is treated as a transient problem and classified as `system_error`
+  - This classification logic is verified by 6 mock-based unit tests (`tests/test_process_ge_batch.py`)
 - DLQ Reprocessor — runs hourly via Cron; only `system_error` records are revalidated and republished to their original topic, re-entering the pipeline from the start (`data_error` records are skipped)
 
 **2. Real-time Trade Matching Engine**

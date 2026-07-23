@@ -77,7 +77,16 @@
      │              (파이프라인 처음부터 재진입)        │
      └─────────────────────────────────────────────┘
 
-[DB/MinIO 저장 실패] → [system_error DLQ] → (위 DLQ Reprocessor가 흡수)
+[DB/MinIO 저장 실패]
+   ↙                              ↘
+연결 장애                        그 외 (제약조건 위반 등)
+(OperationalError,               (NotNullViolation,
+ EndpointConnectionError)         ClientError 등)
+   ↓                                  ↓
+[system_error DLQ]              [data_error DLQ]
+(위 DLQ Reprocessor가 흡수)      (수동 확인 대상)
+
+[GE 검증 실행 자체 실패] → [system_error DLQ] (배치 내 전체 레코드)
 ```
 
 ---
@@ -100,7 +109,11 @@
 - **1단계 (레코드 단위)** Pydantic — 타입/범위/필수값 즉시 검증 (음수 발전량, null 차단)
 - **2단계 (배치 단위, 10개 적재 시)** Great Expectations — 전체 분포 기준 통계적 이상치 감지 (Pydantic 통과분도 여기서 추가로 걸러질 수 있음)
 - 두 단계 중 어디서든 검증 실패 → `data_error` DLQ 격리 (수동 확인 대상, 재처리 없이 로그만 남김)
-- DB/MinIO 저장 과정의 인프라 오류 → `system_error` DLQ 격리
+- **3단계 (저장 단계)** DB/MinIO 저장 시 예외 타입에 따라 분류
+  - 연결 장애(`psycopg2.OperationalError`, `botocore.EndpointConnectionError`) → 재처리 시 복구 가능하므로 `system_error`
+  - 그 외 예외(`NotNullViolation`, `ClientError` 등 제약조건/설정 문제) → 재처리해도 동일하게 실패하므로 `data_error`
+  - GE 통계 검증 실행 자체가 실패한 경우(환경/리소스 문제)도 일시적 문제로 보고 배치 내 전체 레코드를 `system_error`로 분류
+  - 위 분류 로직은 mock 기반 단위 테스트 6종으로 검증됨 (`tests/test_process_ge_batch.py`)
 - DLQ 재처리 — `dlq-reprocessor` 컨테이너가 Cron으로 매시 정각 실행, `system_error`만 재검증 후 원래 Kafka 토픽으로 재발행하여 파이프라인을 처음부터 다시 통과시킴 (`data_error`는 스킵)
 
 **2. 실시간 거래 매칭 엔진**
