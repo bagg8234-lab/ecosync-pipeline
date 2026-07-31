@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 from datetime import date, timedelta
-from dynamic_pricing import get_city_price
+from get_all_city_prices import get_all_city_prices
 from data_generator import generate_generation_data, generate_demand_data
 from db_client import get_connection as get_db_connection
 
@@ -75,14 +75,21 @@ gen_list = generate_generation_data(5)
 dem_list = generate_demand_data(5)
 cities = ["서울", "부산", "인천", "대구", "대전"]
 
-price_data = []
-for i, city in enumerate(cities):
-    result = get_city_price(
-        city=city,
-        generation_kwh=gen_list[i]['generation_kwh'],
-        demand_kwh=dem_list[i]['demand_kwh'],
-    )
-    price_data.append(result)
+
+@st.cache_data(ttl=300)  # 기상/SMP는 분 단위로 급변하지 않으므로 5분 캐싱
+def load_all_city_prices(city_gen_dem: tuple) -> list[dict]:
+    items = [
+        {"city": city, "generation_kwh": gen, "demand_kwh": dem}
+        for city, gen, dem in city_gen_dem
+    ]
+    return get_all_city_prices(items)
+
+
+city_gen_dem = tuple(
+    (cities[i], gen_list[i]['generation_kwh'], dem_list[i]['demand_kwh'])
+    for i in range(5)
+)
+price_data = load_all_city_prices(city_gen_dem)
 
 price_df = pd.DataFrame(price_data)
 cols = ['city', 'price']
@@ -94,7 +101,7 @@ price_df.columns = ['도시', '가격(원/kWh)'] + ['일사량(MJ/m²)', '기온
 st.dataframe(price_df, use_container_width=True, hide_index=True)
 
 
-# 2. 발전량 현황 
+# 2. 발전량 현황
 st.header("☀️ 발전량 현황 (최근 50건)")
 gen_df = load_generation()
 if not gen_df.empty:

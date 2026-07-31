@@ -289,6 +289,7 @@ ecosync-project/
     ├── pipeline.py
     ├── create_mart_table.py     
     ├── run_daily_mart_batch.py    
+    ├── get_all_city_prices.py 
     └── dashboard.py
 ```
 
