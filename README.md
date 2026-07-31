@@ -134,6 +134,56 @@
 
 ---
 
+## 데이터 마트
+
+### 왜 만들었나
+
+기존 Streamlit 대시보드는 `generation`/`demand`를 각각 "최근 50건" 기준으로 조회해 수급비율을 계산했다. 그런데 두 수집기가 독립된 프로세스로 실행되는 구조라, 두 "최근 50건"이 가리키는 실제 시간 구간이 서로 어긋날 수 있는 정합성 문제가 있었다. 대시보드가 늘어나면(Streamlit + Power BI) 집계 로직이 화면마다 따로 구현되며 갈라질 위험도 있었다.
+
+이를 해결하기 위해 raw 4개 테이블(`generation`/`demand`/`trades`/`matching_errors`)을 일자·도시 단위로 미리 집계하는 마트 테이블 `daily_city_trading_summary`를 도입했다.
+
+### 구조
+
+```
+generation ─┐
+demand     ─┼─→ 배치 집계(UPSERT) ─→ daily_city_trading_summary ─→ 모든 대시보드가 이 테이블만 조회
+trades     ─┤
+matching_errors ─┘
+```
+
+| 컬럼 | 설명 |
+|---|---|
+| `summary_date`, `city` | 집계 기준 (PK) |
+| `total_generation_kwh`, `total_demand_kwh` | 일자별 발전량/소비량 합계 |
+| `matched_trade_count`, `matched_kwh` | 매칭 성공 건수/전력량 |
+| `unmatched_error_count`, `unmatched_kwh` | 매칭 실패 건수/전력량 |
+| `match_rate_kwh_pct`, `match_rate_count_pct` | 매칭률 (마트에서 한 번만 계산, 모든 화면이 재사용) |
+
+FULL OUTER JOIN + COALESCE로 raw 테이블 중 일부에만 데이터가 있는 경우도 안전하게 0으로 처리했고, 매칭률 분모가 0인 경우 NULL로 처리해 0으로 나누기 에러를 방지했다.
+
+### 마트를 만들며 발견한 것
+
+1. **매칭 엔진은 "그날 발전량"만 쓰지 않는다** — 이전에 쌓여있던 미매칭 발전량 재고까지 매칭에 사용하는 구조라, 특정일에 발전량이 0이어도 거래는 발생할 수 있다.
+2. **KPX 발전량 API의 데이터 신선도 이슈** — 공공데이터포털엔 "제공주기: 실시간"으로 명시돼 있었지만, 실제 API 응답을 검증해보니 요청 시점과 무관하게 2~3일 지연된 확정 데이터만 반환하고 있었다. (검증 과정과 상세 원인은 [벨로그 포스트] 참고)
+
+### 실행 방법
+
+```bash
+# 1) 마트 테이블 생성 (최초 1회)
+docker exec -it ecosync-app python src/create_mart_table.py
+
+# 2) 과거 데이터 백필 (최초 1회)
+docker exec -it ecosync-app python src/run_daily_mart_batch.py --backfill 30
+
+# 3) 특정일 재적재
+docker exec -it ecosync-app python src/run_daily_mart_batch.py --date 2026-07-31
+
+# 이후 매일 새벽 배치 자동화 (cron 등록 권장)
+docker exec -it ecosync-app python src/run_daily_mart_batch.py
+```
+
+---
+
 ## 데이터베이스 스키마
 
 ![erd](docs/images/erd.png)
@@ -212,9 +262,12 @@ ecosync-project/
 ├── docker-compose.yml
 ├── Dockerfile
 ├── requirements.txt
-├── terraform/              ← Azure 인프라 IaC
+├── terraform/
 │   ├── main.tf
 │   └── variables.tf
+├── sql/                          ← 추가
+│   ├── daily_city_trading_summary.sql
+│   └── daily_city_trading_summary_upsert.sql
 ├── logs/
 │   └── dlq.log
 ├── docs/
@@ -235,6 +288,8 @@ ecosync-project/
     ├── generation_api.py
     ├── dynamic_pricing.py
     ├── pipeline.py
+    ├── create_mart_table.py     
+    ├── run_daily_mart_batch.py    
     └── dashboard.py
 ```
 
