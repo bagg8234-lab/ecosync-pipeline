@@ -265,7 +265,7 @@ ecosync-project/
 ├── terraform/
 │   ├── main.tf
 │   └── variables.tf
-├── sql/                          ← 추가
+├── sql/           
 │   ├── daily_city_trading_summary.sql
 │   └── daily_city_trading_summary_upsert.sql
 ├── logs/
