@@ -67,6 +67,7 @@ services:
       - minio
     volumes:
       - ./src:/app/src
+      - ./sql:/app/sql
       - ./logs:/app/logs
     command: tail -f /dev/null
   
