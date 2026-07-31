@@ -134,6 +134,56 @@ Connection error                   Other (constraint violations, etc.)
 
 ---
 
+## Data Mart
+
+### Why I built this
+
+The existing Streamlit dashboard queried `generation`/`demand` independently using a "most recent 50 rows" window to calculate the supply-demand ratio. However, since the two collectors run as independent processes, the time ranges covered by each "most recent 50 rows" could drift apart — meaning the dashboard could end up comparing data from two different time windows as if they were the same moment. As more dashboards were added (Streamlit + Power BI), there was also a growing risk that each dashboard would implement its own aggregation logic slightly differently.
+
+To address this, I introduced a mart table, `daily_city_trading_summary`, that pre-aggregates the four raw tables (`generation`/`demand`/`trades`/`matching_errors`) at the (date, city) grain.
+
+### Structure
+
+```
+generation ─┐
+demand     ─┼─→ Batch aggregation (UPSERT) ─→ daily_city_trading_summary ─→ All dashboards query only this table
+trades     ─┤
+matching_errors ─┘
+```
+
+| Column | Description |
+|---|---|
+| `summary_date`, `city` | Aggregation key (PK) |
+| `total_generation_kwh`, `total_demand_kwh` | Daily total generation/demand |
+| `matched_trade_count`, `matched_kwh` | Successfully matched trade count/kWh |
+| `unmatched_error_count`, `unmatched_kwh` | Failed match count/kWh |
+| `match_rate_kwh_pct`, `match_rate_count_pct` | Match rate (computed once in the mart, reused by every dashboard) |
+
+I used `FULL OUTER JOIN` + `COALESCE` to safely handle cases where only some of the raw tables had data for a given day, defaulting missing measures to 0. When the denominator of the match rate is 0, it's set to `NULL` instead of raising a division error.
+
+### What I discovered while building it
+
+1. **The matching engine doesn't only use "that day's" generation** — it also draws on previously accumulated, unmatched generation "inventory," so trades can occur even on a day with zero recorded generation.
+2. **A data freshness issue in the KPX generation API** — the public data portal listed the update cycle as "real-time," but when I actually inspected the raw API response, it consistently returned finalized data delayed by 2–3 days, regardless of the request time. (See [Velog post] for the full investigation and root cause.)
+
+### How to run it
+
+```bash
+# 1) Create the mart table (one-time)
+docker exec -it ecosync-app python src/create_mart_table.py
+
+# 2) Backfill historical data (one-time)
+docker exec -it ecosync-app python src/run_daily_mart_batch.py --backfill 30
+
+# 3) Re-run for a specific date
+docker exec -it ecosync-app python src/run_daily_mart_batch.py --date 2026-07-31
+
+# Going forward: schedule as a daily batch job (cron recommended)
+docker exec -it ecosync-app python src/run_daily_mart_batch.py
+```
+
+---
+
 ## Database Schema
 
 ![erd](docs/images/erd.png)
@@ -211,9 +261,12 @@ ecosync-project/
 ├── docker-compose.yml
 ├── Dockerfile
 ├── requirements.txt
-├── terraform/              ← Azure IaC
+├── terraform/
 │   ├── main.tf
 │   └── variables.tf
+├── sql/                 
+│   ├── daily_city_trading_summary.sql
+│   └── daily_city_trading_summary_upsert.sql
 ├── logs/
 │   └── dlq.log
 ├── docs/
@@ -234,6 +287,8 @@ ecosync-project/
     ├── generation_api.py
     ├── dynamic_pricing.py
     ├── pipeline.py
+    ├── create_mart_table.py     
+    ├── run_daily_mart_batch.py    
     └── dashboard.py
 ```
 
