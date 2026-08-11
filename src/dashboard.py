@@ -109,6 +109,35 @@ if not gen_df.empty:
 
 
 # ------------------------------------------------------------
+# 데이터 신선도 체크 — KPX API가 "실시간"으로 명시돼 있음에도
+# 실제로는 수 주 단위로 지연된 데이터를 반환하는 걸 확인해 추가함.
+# 파이프라인이 정상 작동하는 것과 데이터가 최신인 것은 별개 문제라,
+# 신선도를 별도 지표로 노출해 실시간 데이터로 오판하지 않도록 함.
+# ------------------------------------------------------------
+st.header("📅 데이터 신선도")
+if not gen_df.empty:
+    latest_ts = pd.to_datetime(gen_df['timestamp']).max()
+    delay_days = (pd.Timestamp.now() - latest_ts).days
+
+    col1, col2 = st.columns(2)
+    col1.metric("최신 발전량 데이터 기준", latest_ts.strftime("%Y-%m-%d"))
+
+    FRESHNESS_THRESHOLD_DAYS = 7  # 이 기준을 넘으면 "실시간"이라 보기 어렵다고 판단
+
+    if delay_days > FRESHNESS_THRESHOLD_DAYS:
+        col2.metric("지연일수", f"{delay_days}일", delta="지연 발생", delta_color="inverse")
+        st.error(
+            f"⚠️ KPX 발전량 데이터가 {delay_days}일 지연되었습니다 — "
+            f"API 스펙상 '실시간'과 실제 데이터 시점이 불일치합니다."
+        )
+    else:
+        col2.metric("지연일수", f"{delay_days}일", delta="정상")
+        st.success("✅ 데이터가 신선도 기준 내에 있습니다.")
+else:
+    st.info("발전량 데이터가 없어 신선도를 확인할 수 없어요.")
+
+
+# ------------------------------------------------------------
 # 날짜 range 선택 (마트 기반 섹션 공통으로 사용)
 # ------------------------------------------------------------
 st.divider()
