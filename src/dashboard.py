@@ -98,7 +98,7 @@ for col in ['solar_radiation', 'temperature', 'generation_kwh', 'demand_kwh']:
         cols.append(col)
 price_df = price_df[cols]
 price_df.columns = ['도시', '가격(원/kWh)'] + ['일사량(MJ/m²)', '기온(°C)', '공급(kWh)', '수요(kWh)'][: len(cols) - 2]
-price_df.loc[price_df['도시'] == '대구', '일사량(MJ/m²)'] = None
+# price_df.loc[price_df['도시'] == '대구', '일사량(MJ/m²)'] = None
 st.dataframe(price_df, use_container_width=True, hide_index=True)
 
 
