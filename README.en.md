@@ -1,22 +1,22 @@
-# ⚡ EcoSync — Real-time Renewable Energy Trading Data Pipeline
+# ⚡ EcoSync — Real-Time Renewable Energy Trading Data Pipeline
 
 **🌐 Language:** [한국어](README.md) | [English](README.en.md)
 
-A data pipeline that brokers real-time energy trading between solar energy prosumers and consumers, optimizing energy efficiency through data collection, validation, and matching.
+A data pipeline that brokers real-time energy trades between renewable (solar) prosumers and demand-side consumers, collecting, validating, and matching data to optimize energy efficiency.
 
 ---
 
 ## Design Philosophy
 
-Built on a **Local Validation → Cloud Migration** strategy.
+Built with a **local validation → cloud migration** strategy.
 
-1. **Environment Independence** — Docker ensures identical execution regardless of OS
-2. **Logic First** — Fully validate pipeline logic with small datasets before moving to cloud
-3. **Zero Code Change Migration** — Only `.env` connection settings change between local and Azure
-4. **Infrastructure as Code** — Terraform manages Azure resources for reproducible environments
+1. **Environment independence** — Runs identically anywhere via Docker, with no OS dependency
+2. **Logic validation first** — Fully validate pipeline integrity with small-scale data before moving to the cloud
+3. **Environment switching without code changes** — Swap only the `.env` connection settings to switch between local and Azure
+4. **Infrastructure as code** — Manage Azure resources reproducibly with Terraform
 
-> Running cloud resources with flawed logic is wasteful.  
-> Validate locally first, then deploy the proven code to the cloud.
+> Spending cloud resources while the logic is still wrong is wasteful.  
+> I validated everything locally first, then deployed the validated code as-is to the cloud.
 
 ---
 
@@ -44,7 +44,7 @@ Built on a **Local Validation → Cloud Migration** strategy.
 ## Architecture
 
 ```
-[KPX Solar Generation API]     [Demand Dummy Data]
+[KPX Real Generation API]     [Demand Dummy Data]
         ↓                        ↓
    [Kafka Producer]──────────────┘
         ↓
@@ -52,41 +52,40 @@ Built on a **Local Validation → Cloud Migration** strategy.
         ↓
   [Pipeline Consumer]
         ↓
-   [Pydantic]          ← Individual record validation (type/range/required fields)
+   [Pydantic]          ← per-record validation (type/range/required fields)
    ↙              ↘
-[data_error DLQ]   [Buffer accumulation (batches of 10)]
-(manual review)          ↓
-                   [Great Expectations]  ← Batch-level statistical validation (distribution/outliers)
+[data_error DLQ]   [Buffer (batches of 10)]
+(manual review)         ↓
+                   [Great Expectations]  ← batch-level statistical validation (distribution/outliers)
                    ↙              ↘
             [data_error DLQ]   [PostgreSQL + MinIO]
             (manual review)          ↓
                                 [Matching Engine]      ← Haversine distance-based
                                      ↓
-                            [Dynamic Pricing]  ← KMA weather API + KPX SMP
+                            [Dynamic Pricing]  ← Weather API + KPX SMP
                                      ↓
                            [Streamlit Dashboard]
 
-     ┌─────────────────────────────────────────────────┐
-     │      [DLQ Reprocessor] ← Cron (hourly, on the hour) │
-     │   Consumes the dead-letter topic                  │
-     │   ├─ error_type = data_error  → Skip (log only)   │
-     │   └─ error_type = system_error → Revalidate (Pydantic)│
-     │        └─ On pass, republish to original topic     │
-     │           (generation/demand) → back to Kafka       │
-     │              (re-enters pipeline from the start)   │
-     └─────────────────────────────────────────────────┘
+     ┌─────────────────────────────────────────────┐
+     │      [DLQ Reprocessor] ← Cron (hourly on the hour) │
+     │   Consumes dead-letter topic                   │
+     │   ├─ error_type = data_error  → skip (log only) │
+     │   └─ error_type = system_error → re-validate (Pydantic)│
+     │        └─ on pass, republish to original topic  │
+     │           (generation/demand) → back into Kafka │
+     │              (re-enters pipeline from the start)│
+     └─────────────────────────────────────────────┘
 
-[DB/Storage write failure]
-   ↙                                  ↘
-Connection error                   Other (constraint violations, etc.)
-(OperationalError,                 (NotNullViolation,
- EndpointConnectionError)           ClientError, etc.)
-   ↓                                    ↓
-[system_error DLQ]                [data_error DLQ]
-(absorbed by the DLQ                (manual review)
- Reprocessor above)
+[DB/MinIO write failure]
+   ↙                              ↘
+Connection failure                Other (constraint violations, etc.)
+(OperationalError,                (NotNullViolation,
+ EndpointConnectionError)          ClientError, etc.)
+   ↓                                  ↓
+[system_error DLQ]              [data_error DLQ]
+(absorbed by DLQ Reprocessor above)  (manual review)
 
-[GE validation execution failure] → [system_error DLQ] (entire batch of records)
+[GE validation run itself fails] → [system_error DLQ] (entire batch of records)
 ```
 
 ---
@@ -106,47 +105,55 @@ Connection error                   Other (constraint violations, etc.)
 ## Key Features
 
 **1. Data Integrity Validation**
-- **Stage 1 (per-record)** Pydantic — Type/range/required field validation (negative generation, null values)
-- **Stage 2 (batch of 10)** Great Expectations — Statistical anomaly detection across the full distribution (can catch records that already passed Pydantic)
-- Failed validation at either stage → `data_error` DLQ isolation (manual review, no retry)
-- **Stage 3 (storage)** DB/Storage write failures are classified by exception type
-  - Connection errors (`psycopg2.OperationalError`, `botocore.EndpointConnectionError`) → recoverable on retry, so classified as `system_error`
-  - Other exceptions (`NotNullViolation`, `ClientError`, etc. — constraint or configuration issues) → will fail identically on retry, so classified as `data_error`
-  - If the GE validation call itself fails (environment/resource issue), the entire batch is treated as a transient problem and classified as `system_error`
-  - This classification logic is verified by 6 mock-based unit tests (`tests/test_process_ge_batch.py`)
-- DLQ Reprocessor — runs hourly via Cron; only `system_error` records are revalidated and republished to their original topic, re-entering the pipeline from the start (`data_error` records are skipped)
+- **Stage 1 (record-level)** Pydantic — immediate type/range/required-field validation (blocks negative generation values, nulls)
+- **Stage 2 (batch-level, on every 10 records)** Great Expectations — statistical outlier detection against the overall distribution (can still catch records that passed Pydantic)
+- A failure at either stage → isolated to the `data_error` DLQ (manual review, logged only, not reprocessed)
+- **Stage 3 (storage)** Classified by exception type on DB/MinIO write
+  - Connection failures (`psycopg2.OperationalError`, `botocore.EndpointConnectionError`) → recoverable on retry, so classified as `system_error`
+  - Other exceptions (`NotNullViolation`, `ClientError`, etc. — constraint/config issues) → would fail identically on retry, so classified as `data_error`
+  - If the GE validation run itself fails (environment/resource issue), the entire batch is treated as transient and classified as `system_error`
+  - This classification logic is covered by 6 mock-based unit tests (`tests/test_process_ge_batch.py`)
+- DLQ reprocessing — the `dlq-reprocessor` container runs hourly via cron, re-validates only `system_error` records, and republishes them to the original Kafka topic so they re-enter the pipeline from the start (`data_error` records are skipped)
 
-**2. Real-time Trade Matching Engine**
-- Distance calculation using Haversine formula
-- Nearest supplier priority matching
-- Automatic fallback to next candidate when supply is insufficient
-- Failed match log stored separately
+**2. Real-Time Trade Matching Engine**
+- Distance calculation via the Haversine formula (lat/long)
+- Matches to the nearest available supplier first
+- Automatically falls through to the next candidate if supply is insufficient
+- Match failures are logged separately
 
 **3. Dynamic Pricing**
-- Korea Meteorological Administration API (real-time solar radiation/temperature)
-- KPX SMP real data integration (replaced fixed 150 KRW → actual market price)
-- Price = SMP × solar radiation factor × supply/demand ratio × temperature correction
+- Integrated with the Korea Meteorological Administration API (real-time solar radiation/temperature)
+- Integrated with real KPX SMP data (replaced the previous fixed price of 150 KRW with actual market prices)
+- Price computed from solar radiation coefficient × supply-demand ratio × temperature adjustment
 
 **4. Real Data Integration**
-- KPX solar generation API (by region and hour)
+- KPX (Korea Power Exchange) solar generation API (by region, by hour)
 - KPX SMP (System Marginal Price) API
-- Demand data uses dummy data due to lack of public API
+- Demand data remains dummy data due to the absence of a public API
+
+**5. Data Quality Alerts**
+- **Freshness check** — The KPX generation API is documented as "real-time," but in practice it turned out to update in batches, with the latest data frozen at a point 61 days in the past. Added a check that raises a dashboard warning whenever the gap between the latest data timestamp and the current time exceeds a threshold (7 days) (`dashboard.py`; see the dashboard screenshot above)
+- **Completeness check** — Confirmed that even when an API call succeeds (no error returned), a partial failure can occur where a given city's fields come back entirely empty. Added a check that raises a warning when any required per-city column contains a missing value
+
+  ![completeness-alert](docs/images/completeness-alert.png)
+
+- Both checks start from the same premise: "the request succeeded" and "the data is correct/complete" are two different questions
 
 ---
 
 ## Data Mart
 
-### Why I built this
+### Why it was built
 
-The existing Streamlit dashboard queried `generation`/`demand` independently using a "most recent 50 rows" window to calculate the supply-demand ratio. However, since the two collectors run as independent processes, the time ranges covered by each "most recent 50 rows" could drift apart — meaning the dashboard could end up comparing data from two different time windows as if they were the same moment. As more dashboards were added (Streamlit + Power BI), there was also a growing risk that each dashboard would implement its own aggregation logic slightly differently.
+The original Streamlit dashboard queried `generation`/`demand` independently, each limited to "the most recent 50 records," to compute the supply-demand ratio. But since the two collectors run as independent processes, the actual time windows covered by each "most recent 50" could drift apart — a consistency problem. As more dashboards were added (Streamlit + Power BI), there was also a risk of aggregation logic diverging across screens since each would implement it separately.
 
-To address this, I introduced a mart table, `daily_city_trading_summary`, that pre-aggregates the four raw tables (`generation`/`demand`/`trades`/`matching_errors`) at the (date, city) grain.
+To address this, a mart table, `daily_city_trading_summary`, was introduced to pre-aggregate the four raw tables (`generation`/`demand`/`trades`/`matching_errors`) by date and city.
 
 ### Structure
 
 ```
 generation ─┐
-demand     ─┼─→ Batch aggregation (UPSERT) ─→ daily_city_trading_summary ─→ All dashboards query only this table
+demand     ─┼─→ Batch aggregation (UPSERT) ─→ daily_city_trading_summary ─→ every dashboard queries only this table
 trades     ─┤
 matching_errors ─┘
 ```
@@ -154,19 +161,19 @@ matching_errors ─┘
 | Column | Description |
 |---|---|
 | `summary_date`, `city` | Aggregation key (PK) |
-| `total_generation_kwh`, `total_demand_kwh` | Daily total generation/demand |
-| `matched_trade_count`, `matched_kwh` | Successfully matched trade count/kWh |
-| `unmatched_error_count`, `unmatched_kwh` | Failed match count/kWh |
-| `match_rate_kwh_pct`, `match_rate_count_pct` | Match rate (computed once in the mart, reused by every dashboard) |
+| `total_generation_kwh`, `total_demand_kwh` | Daily total generation/consumption |
+| `matched_trade_count`, `matched_kwh` | Successful match count/volume |
+| `unmatched_error_count`, `unmatched_kwh` | Failed match count/volume |
+| `match_rate_kwh_pct`, `match_rate_count_pct` | Match rate (computed once in the mart, reused by every screen) |
 
-I used `FULL OUTER JOIN` + `COALESCE` to safely handle cases where only some of the raw tables had data for a given day, defaulting missing measures to 0. When the denominator of the match rate is 0, it's set to `NULL` instead of raising a division error.
+Used FULL OUTER JOIN + COALESCE to safely default to 0 when only some of the raw tables have data for a given day, and set the match-rate denominator to NULL when it would be zero, to prevent divide-by-zero errors.
 
-### What I discovered while building it
+### What building the mart revealed
 
-1. **The matching engine doesn't only use "that day's" generation** — it also draws on previously accumulated, unmatched generation "inventory," so trades can occur even on a day with zero recorded generation.
-2. **A data freshness issue in the KPX generation API** — the public data portal listed the update cycle as "real-time," but when I actually inspected the raw API response, it consistently returned finalized data delayed by 2–3 days, regardless of the request time. (See [Velog post] for the full investigation and root cause.)
+1. **The matching engine doesn't only use "today's generation"** — because it also draws on previously accumulated, unmatched generation inventory, trades can still occur on a day when generation is 0.
+2. **A data-freshness issue in the KPX generation API** — the public data portal listed the "update frequency" as "real-time," but validating the actual API response showed the latest data was frozen at a point 61 days behind the current time. A freshness check was subsequently added to the dashboard, raising a warning whenever the delay exceeds a threshold (7 days). (See the [Velog post] for the validation process and detailed root cause.)
 
-### How to run it
+### How to run
 
 ```bash
 # 1) Create the mart table (one-time)
@@ -175,10 +182,10 @@ docker exec -it ecosync-app python src/create_mart_table.py
 # 2) Backfill historical data (one-time)
 docker exec -it ecosync-app python src/run_daily_mart_batch.py --backfill 30
 
-# 3) Re-run for a specific date
+# 3) Reload a specific date
 docker exec -it ecosync-app python src/run_daily_mart_batch.py --date 2026-07-31
 
-# Going forward: schedule as a daily batch job (cron recommended)
+# Recommend registering a nightly cron job for ongoing daily batches
 docker exec -it ecosync-app python src/run_daily_mart_batch.py
 ```
 
@@ -188,19 +195,19 @@ docker exec -it ecosync-app python src/run_daily_mart_batch.py
 
 ![erd](docs/images/erd.png)
 
-| Table | Description |
+| Table | Role |
 | :--- | :--- |
-| `generation` | Solar generation raw data |
+| `generation` | Raw solar generation data |
 | `demand` | Demand data |
-| `trades` | Matched trade records |
-| `matching_errors` | Failed match logs |
+| `trades` | Successfully matched trade records |
+| `matching_errors` | Match failure logs |
 
 ---
 
-## Azure Migration (azure branch)
+## Azure Migration (`azure` branch)
 
-Migrated from local Docker to Azure cloud.  
-Only `.env` connection settings need to be changed — no code modifications required.  
+A version of the local Docker environment migrated to Azure cloud.  
+The same code runs unchanged — only the `.env` connection settings need to be swapped.  
 Azure resources are provisioned via Terraform.
 
 ### Azure Resources
@@ -209,11 +216,11 @@ Azure resources are provisioned via Terraform.
 
 ![eventhub](docs/images/eventhub.png)
 
-**Event Hubs Monitoring** — Real-time message throughput
+**Event Hubs Monitoring** — Real-time message processing status
 
 ![eventhubs](docs/images/eventhubs.png)
 
-**ADLS Gen2** — Raw data lake (demand / generation stored by date)
+**ADLS Gen2** — Raw data lake (demand/generation, partitioned by date)
 
 ![storage](docs/images/storage.png)
 
@@ -232,9 +239,10 @@ terraform apply
 
 ### Power BI Dashboard
 
-Connected Power BI Desktop to Azure PostgreSQL for operational monitoring.
+Connects Azure PostgreSQL data to Power BI Desktop to visualize operational status.
 
 ![powerbi](docs/images/powerbi.png)
+
 
 ### Pipeline Execution Logs
 
@@ -242,18 +250,18 @@ Connected Power BI Desktop to Azure PostgreSQL for operational monitoring.
 
 ![producer](docs/images/producer실행로그.png)
 
-**Pipeline — Validation, Storage, and Matching Engine**
+**Pipeline — Validation, storage, and matching engine execution**
 
 ![pipeline](docs/images/pipeline실행로그.png)
 
 ### Troubleshooting
 
-- **Event Hubs Basic tier** → Kafka protocol not supported (`NoBrokersAvailable`) → Upgraded to Standard
-- **DLQ infinite loop** → Resolved by classifying `data_error` vs `system_error`
+- **Event Hubs Basic tier** → Kafka protocol unsupported (`NoBrokersAvailable`) → switched to Standard tier
+- **DLQ infinite loop** → resolved via data_error / system_error classification
 
 ---
 
-## Project Structure
+## Folder Structure
 
 ```
 ecosync-project/
@@ -264,7 +272,7 @@ ecosync-project/
 ├── terraform/
 │   ├── main.tf
 │   └── variables.tf
-├── sql/                 
+├── sql/           
 │   ├── daily_city_trading_summary.sql
 │   └── daily_city_trading_summary_upsert.sql
 ├── logs/
@@ -288,14 +296,14 @@ ecosync-project/
     ├── dynamic_pricing.py
     ├── pipeline.py
     ├── create_mart_table.py     
-    ├── run_daily_mart_batch.py    
+    ├── run_daily_mart_batch.py   
     ├── get_all_city_prices.py 
     └── dashboard.py
 ```
 
 ---
 
-## Getting Started
+## How to Run
 
 ### Local (Docker)
 
@@ -322,12 +330,12 @@ docker exec -it ecosync-app streamlit run src/dashboard.py --server.address=0.0.
 Kafka UI: `http://localhost:8080`  
 Streamlit: `http://localhost:8501`
 
-### Azure (azure branch)
+### Azure (`azure` branch)
 
 ```bash
 git checkout azure
 cp .env.example .env
-# Add Azure connection info to .env
+# Enter your Azure connection info in .env
 ```
 
 Terminal 1:
@@ -340,7 +348,7 @@ Terminal 2:
 python src/kafka_producer.py
 ```
 
-DLQ Reprocessor:
+DLQ reprocessing:
 ```bash
 python src/dlq_reprocessor.py
 ```
