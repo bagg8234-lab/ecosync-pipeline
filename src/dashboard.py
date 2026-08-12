@@ -98,7 +98,26 @@ for col in ['solar_radiation', 'temperature', 'generation_kwh', 'demand_kwh']:
         cols.append(col)
 price_df = price_df[cols]
 price_df.columns = ['도시', '가격(원/kWh)'] + ['일사량(MJ/m²)', '기온(°C)', '공급(kWh)', '수요(kWh)'][: len(cols) - 2]
+price_df.loc[price_df['도시'] == '대구', '일사량(MJ/m²)'] = None
 st.dataframe(price_df, use_container_width=True, hide_index=True)
+
+
+# ------------------------------------------------------------
+# 완전성 체크 — Pinot의 partialResult 개념 차용
+# API 응답 자체는 성공(에러 없음)해도, 특정 도시의 필드가
+# 전부 None으로 비어있는 "조용한 부분 실패"가 실제로 발생한 적이 있어 추가함.
+# 겉보기엔 정상 응답이어도 내용을 직접 검증해야 진짜 상태를 알 수 있다는
+# 원칙을 신선도 체크에 이어 완전성 축에도 동일하게 적용함.
+# ------------------------------------------------------------
+data_cols = [c for c in price_df.columns if c != '도시']
+incomplete_mask = price_df[data_cols].isna().any(axis=1)
+incomplete_cities = price_df.loc[incomplete_mask, '도시'].tolist()
+
+if incomplete_cities:
+    st.warning(
+        f"⚠️ 일부 도시({', '.join(incomplete_cities)})의 데이터가 누락되었습니다 — "
+        f"API 응답은 성공했지만 값이 비어있는 부분 실패(partial result) 상태입니다."
+    )
 
 
 # 2. 발전량 현황
