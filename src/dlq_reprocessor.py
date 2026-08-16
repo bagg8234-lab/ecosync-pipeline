@@ -1,8 +1,13 @@
 import json
 import time
 from kafka import KafkaConsumer, KafkaProducer
-from kafka.errors import NoBrokersAvailable
+from kafka.errors import NoBrokersAvailable, KafkaError
 from validator import validate_generation, validate_demand
+from tenacity import retry, wait_exponential, stop_after_attempt, retry_if_exception_type, before_sleep_log
+import logging
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 def create_consumer():
     for i in range(5):
@@ -37,6 +42,17 @@ def create_producer():
             print(f"연결 실패 {i+1}/5 - 5초 후 재시도...")
             time.sleep(5)
     raise Exception("DLQ Producer 연결 실패")
+
+@retry(
+    wait=wait_exponential(multiplier=1, min=1, max=30),  # 1초 → 2초 → 4초 → 8초 → 16초 (최대 30초)
+    stop=stop_after_attempt(5),
+    retry=retry_if_exception_type(KafkaError),
+    before_sleep=before_sleep_log(logger, logging.WARNING)
+)
+def republish_with_backoff(producer, data_type, original_data):
+    """재검증 통과 데이터를 원래 토픽으로 재발행. 실패 시 지수 백오프로 최대 5회 재시도"""
+    producer.send(data_type, value=original_data)
+    producer.flush()
 
 def reprocess_dlq():
     """
@@ -81,11 +97,14 @@ def reprocess_dlq():
             continue
 
         if is_valid:
-            # 재검증 통과 -> 원래 토픽으로 재발행
-            producer.send(data_type, value=original_data)
-            producer.flush()
-            print(f"✅ 재처리 성공 -> {data_type} 토픽 재발행")
-            success +=1
+            try:
+                republish_with_backoff(producer, data_type, original_data)
+                print(f"✅ 재처리 성공 -> {data_type} 토픽 재발행")
+                success += 1
+            except KafkaError as e:
+                # 5회 재시도(지수 백오프)까지 모두 실패 -> 다음 cron 사이클로 넘김
+                print(f"❌ 재발행 최종 실패 (5회 재시도 후): {e}")
+                fail += 1
         else:
             # 재검증 실패 -> 스킵
             print(f"❌ 재처리 실패 - 여전히 유효하지 않음: {error}")

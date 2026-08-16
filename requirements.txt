@@ -17,3 +17,5 @@ python-dotenv==1.0.1
 streamlit==1.34.0
 # 스토리지 계정 
 azure-storage-blob
+
+tenacity==8.2.3
