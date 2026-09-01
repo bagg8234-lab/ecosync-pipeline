@@ -13,11 +13,11 @@
 
 1. **환경 독립성** — Docker로 OS 종속 없이 어디서나 동일하게 실행
 2. **로직 검증 우선** — 소량 데이터로 파이프라인 무결성 완전 검증 후 클라우드 이전
-3. **코드 수정 없는 환경 전환** — `.env` 연결 설정만 교체하면 로컬 ↔ Azure 전환 가능
+3. **최소한의 환경 전환 비용** — 연결 정보는 .env로 분리 관리. Kafka(→Event Hubs)·PostgreSQL은 프로토콜 호환으로 연결 정보 교체만으로 전환됐지만, MinIO(→ADLS Gen2)는 API 자체가 달라 SDK를 다시 작성
 4. **인프라 코드화** — Terraform으로 Azure 리소스 재현 가능하게 관리
 
 > 로직이 틀린 상태에서 클라우드 자원을 쓰는 건 낭비입니다.  
-> 로컬에서 완전히 검증하고, 검증된 코드를 그대로 클라우드로 올렸습니다.
+> 로컬에서 로직을 완전히 검증한 뒤, 연동 대상의 프로토콜 호환 여부에 따라 필요한 만큼만 코드를 수정해 클라우드로 이전했습니다.
 
 ---
 
@@ -98,7 +98,7 @@
 | Message Broker | Kafka + Kafka UI | Azure Event Hubs (Kafka 호환) |
 | Storage | MinIO (S3 호환) | ADLS Gen2 |
 | Database | PostgreSQL v16 | Azure Database for PostgreSQL |
-| Visualization | Streamlit / Tableau | Streamlit + Power BI |
+| Visualization | Streamlit | Streamlit + Power BI |
 | IaC | Docker Compose | Terraform |
 
 ---
