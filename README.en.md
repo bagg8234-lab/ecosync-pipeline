@@ -6,6 +6,34 @@ A data pipeline that brokers real-time energy trades between renewable (solar) p
 
 ---
 
+## Project Background
+
+In Jeju, solar generation frequently exceeds demand, and the grid can't absorb
+all of the surplus power, so plants are forced into curtailment more and more
+each year. In 2020 alone, curtailment occurred 77 times in Jeju, cutting
+19GWh of generation and causing an estimated ₩3 billion in losses — a real
+financial burden for generation operators. The root cause is that generation
+and demand aren't matched in real time.
+
+One approach to easing this is the "microgrid" model — a local area that
+generates, consumes, and shares surplus power on its own — which is also
+spreading in Korea. In practice, though, these systems still settle
+supply-demand data with delay or run on fixed rules, so they can't fully
+respond to real-time volatility.
+
+As a data engineer, I focused on how this gap could be addressed in software.
+Generation data comes from KPX's public API, and since no public API exists
+for demand, I substituted dummy data. I designed and validated a pipeline
+(EcoSync) that ingests data via Kafka, processes it in micro-batches for
+collection/validation/matching, and computes dynamic pricing in near
+real time.
+
+> Curtailment loss figures (Jeju, 2020: 77 times / 19GWh / ~₩3 billion) are
+> from [Energy Economy Newspaper (에너지경제신문), Mar 30, 2021]
+> (https://m.ekn.kr/view.php?key=20210330010006087).
+
+---
+
 ## Design Philosophy
 
 Built with a **local validation → cloud migration** strategy.
@@ -206,9 +234,12 @@ docker exec -it ecosync-app python src/run_daily_mart_batch.py
 
 ## Azure Migration (`azure` branch)
 
-A version of the local Docker environment migrated to Azure cloud.  
-The same code runs unchanged — only the `.env` connection settings need to be swapped.  
-Azure resources are provisioned via Terraform.
+This is the version migrated from the local Docker environment to Azure Cloud.
+Migration difficulty varied by component. Kafka (→ Event Hubs) and PostgreSQL
+use compatible protocols, so only the connection info in `.env` needed to
+change. MinIO (→ ADLS Gen2), however, uses a completely different API, so the
+`boto3` client code had to be rewritten using the `azure-storage-blob` SDK.
+Azure resources are provisioned with Terraform.
 
 ### Azure Resources
 
