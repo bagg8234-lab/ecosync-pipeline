@@ -8,29 +8,24 @@ A data pipeline that brokers real-time energy trades between renewable (solar) p
 
 ## Project Background
 
-In Jeju, solar generation frequently exceeds demand, and the grid can't absorb
-all of the surplus power, so plants are forced into curtailment more and more
-each year. In 2020 alone, curtailment occurred 77 times in Jeju, cutting
-19GWh of generation and causing an estimated ₩3 billion in losses — a real
-financial burden for generation operators. The root cause is that generation
+In Jeju, solar and wind generation frequently exceed demand, and curtailment
+has surged from 3 times in 2015 to around 132 times recently, with operator
+losses projected in the trillions of KRW. The root cause is that generation
 and demand aren't matched in real time.
 
-One approach to easing this is the "microgrid" model — a local area that
-generates, consumes, and shares surplus power on its own — which is also
-spreading in Korea. In practice, though, these systems still settle
-supply-demand data with delay or run on fixed rules, so they can't fully
-respond to real-time volatility.
+One mitigation is the "microgrid" model — local self-generation, consumption,
+and storage — which is spreading in Korea. In practice, though, these systems
+still settle supply-demand data with delay or run on fixed rules, so they
+can't fully respond to real-time volatility.
 
-As a data engineer, I focused on how this gap could be addressed in software.
-Generation data comes from KPX's public API, and since no public API exists
-for demand, I substituted dummy data. I designed and validated a pipeline
-(EcoSync) that ingests data via Kafka, processes it in micro-batches for
+So I designed and validated a micro-batch pipeline (EcoSync) that ingests
+generation data (KPX API) and demand data (dummy data) via Kafka, performs
 collection/validation/matching, and computes dynamic pricing in near
 real time.
 
-> Curtailment loss figures (Jeju, 2020: 77 times / 19GWh / ~₩3 billion) are
-> from [Energy Economy Newspaper (에너지경제신문), Mar 30, 2021]
-> (https://m.ekn.kr/view.php?key=20210330010006087).
+> Curtailment count and loss projections are from
+> [Pinpoint News, Nov 3, 2025]
+> (https://www.pinpointnews.co.kr/news/articleView.html?idxno=391320).
 
 ---
 
