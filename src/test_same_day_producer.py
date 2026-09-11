@@ -5,17 +5,18 @@
 사용법:
   docker exec -it ecosync-app python src/test_same_day_producer.py
 
-주의: 이건 테스트 전용 스크립트입니다. kafka_producer.py(운영용, KPX 실제 API 사용)는
-그대로 두고, 이 스크립트로 "같은 날짜 매칭 성공" 케이스만 짧게 검증한 뒤
-정리(삭제 또는 보관)하시면 됩니다.
+주의: 이건 테스트 전용 스크립트입니다.
 """
+
 import json
 import time
 from kafka import KafkaProducer
 from kafka.errors import NoBrokersAvailable
 from data_generator import generate_generation_data, generate_demand_data
-
-
+ 
+BOOST_FACTOR = 50  # 발전량을 넉넉하게 키우는 배수 (필요시 조정)
+ 
+ 
 def create_producer():
     for i in range(5):
         try:
@@ -29,26 +30,29 @@ def create_producer():
             print(f"Kafka 연결 실패 ({i+1}/5) — 5초 후 재시도...")
             time.sleep(5)
     raise Exception("Kafka 연결 실패 — 컨테이너 상태 확인 필요")
-
-
+ 
+ 
 producer = create_producer()
-
-
-def publish_same_day_test(num_records: int = 10):
+ 
+ 
+def publish_clean_match_test(num_records: int = 10):
     gen_data = generate_generation_data(num_records)
     for record in gen_data:
+        # 발전량 부족(밤 시간대 등)으로 매칭 실패가 섞이지 않도록 넉넉하게 증폭
+        record["generation_kwh"] = round(record["generation_kwh"] * BOOST_FACTOR + 200, 2)
         producer.send('generation', value=record)
         print(f"[TEST] 발전량 게시: {record['city']} | {record['generation_kwh']} kWh | {record['timestamp']}")
-
+ 
     dem_data = generate_demand_data(num_records)
     for record in dem_data:
         producer.send('demand', value=record)
         print(f"[TEST] 수요 게시: {record['city']} | {record['demand_kwh']} kWh | {record['timestamp']}")
-
+ 
     producer.flush()
-
-
+ 
+ 
 if __name__ == "__main__":
-    print("[TEST] 같은 날짜(오늘) generation/demand 발행 시작...")
-    publish_same_day_test(10)
+    print("[TEST] 공급 넉넉한 같은 날짜(오늘) generation/demand 발행 시작...")
+    publish_clean_match_test(10)
     print("[TEST] 발행 완료 — pipeline.py 콘솔에서 매칭 결과를 확인하세요.")
+ 
