@@ -6,6 +6,29 @@ A data pipeline that brokers real-time energy trades between renewable (solar) p
 
 ---
 
+## Project Background
+
+In Jeju, solar and wind generation frequently exceed demand, and curtailment
+has surged from 3 times in 2015 to around 132 times recently, with operator
+losses projected in the trillions of KRW. The root cause is that generation
+and demand aren't matched in real time.
+
+One mitigation is the "microgrid" model — local self-generation, consumption,
+and storage — which is spreading in Korea. In practice, though, these systems
+still settle supply-demand data with delay or run on fixed rules, so they
+can't fully respond to real-time volatility.
+
+So I designed and validated a micro-batch pipeline (EcoSync) that ingests
+generation data (KPX API) and demand data (dummy data) via Kafka, performs
+collection/validation/matching, and computes dynamic pricing in near
+real time.
+
+> Curtailment count and loss projections are from
+> [Pinpoint News, Nov 3, 2025]
+> (https://www.pinpointnews.co.kr/news/articleView.html?idxno=391320).
+
+---
+
 ## Design Philosophy
 
 Built with a **local validation → cloud migration** strategy.
@@ -206,9 +229,12 @@ docker exec -it ecosync-app python src/run_daily_mart_batch.py
 
 ## Azure Migration (`azure` branch)
 
-A version of the local Docker environment migrated to Azure cloud.  
-The same code runs unchanged — only the `.env` connection settings need to be swapped.  
-Azure resources are provisioned via Terraform.
+This is the version migrated from the local Docker environment to Azure Cloud.
+Migration difficulty varied by component. Kafka (→ Event Hubs) and PostgreSQL
+use compatible protocols, so only the connection info in `.env` needed to
+change. MinIO (→ ADLS Gen2), however, uses a completely different API, so the
+`boto3` client code had to be rewritten using the `azure-storage-blob` SDK.
+Azure resources are provisioned with Terraform.
 
 ### Azure Resources
 

@@ -7,17 +7,37 @@
 
 ---
 
+## 프로젝트 배경
+
+제주도는 태양광·풍력 발전량이 수요를 초과하는 순간이 잦아, 출력제한이 2015년
+3회에서 최근 132회로 급증했고 사업자 손실도 조 단위로 전망됩니다. 근본 원인은
+발전량과 수요량이 실시간으로 맞춰지지 못한다는 데 있습니다.
+
+이를 완화할 방향으로 마이크로그리드(지역 내 자체 발전·소비·저장) 방식이
+국내에서도 확산되고 있지만, 실제로는 수급 데이터 정산 지연이나 고정 규칙
+운영으로 실시간 변동성에 완벽히 대응하지 못하는 한계가 있습니다.
+
+그래서 발전량(KPX API)과 수요량(더미 데이터)을 Kafka로 수집·검증·매칭하고,
+변동 가격을 즉시 산출하는 마이크로배치 파이프라인(EcoSync)을 직접 설계하고
+검증했습니다.
+
+> 출력제한 횟수·손실 전망은
+> [핀포인트뉴스, 2025.11.03](https://www.pinpointnews.co.kr/news/articleView.html?idxno=391320)
+> 기준입니다.
+
+---
+
 ## 설계 철학
 
 **로컬 검증 → 클라우드 이전** 전략으로 구축했습니다.
 
 1. **환경 독립성** — Docker로 OS 종속 없이 어디서나 동일하게 실행
 2. **로직 검증 우선** — 소량 데이터로 파이프라인 무결성 완전 검증 후 클라우드 이전
-3. **코드 수정 없는 환경 전환** — `.env` 연결 설정만 교체하면 로컬 ↔ Azure 전환 가능
+3. **최소한의 환경 전환 비용** — 연결 정보는 .env로 분리 관리. Kafka(→Event Hubs)·PostgreSQL은 프로토콜 호환으로 연결 정보 교체만으로 전환됐지만, MinIO(→ADLS Gen2)는 API 자체가 달라 SDK를 다시 작성
 4. **인프라 코드화** — Terraform으로 Azure 리소스 재현 가능하게 관리
 
 > 로직이 틀린 상태에서 클라우드 자원을 쓰는 건 낭비입니다.  
-> 로컬에서 완전히 검증하고, 검증된 코드를 그대로 클라우드로 올렸습니다.
+> 로컬에서 로직을 완전히 검증한 뒤, 연동 대상의 프로토콜 호환 여부에 따라 필요한 만큼만 코드를 수정해 클라우드로 이전했습니다.
 
 ---
 
@@ -98,7 +118,7 @@
 | Message Broker | Kafka + Kafka UI | Azure Event Hubs (Kafka 호환) |
 | Storage | MinIO (S3 호환) | ADLS Gen2 |
 | Database | PostgreSQL v16 | Azure Database for PostgreSQL |
-| Visualization | Streamlit / Tableau | Streamlit + Power BI |
+| Visualization | Streamlit | Streamlit + Power BI |
 | IaC | Docker Compose | Terraform |
 
 ---
@@ -207,8 +227,10 @@ docker exec -it ecosync-app python src/run_daily_mart_batch.py
 
 ## Azure 이전 (azure 브랜치)
 
-로컬 Docker 환경을 Azure 클라우드로 이전한 버전입니다.  
-`.env` 연결 설정만 교체하면 동일한 코드로 동작합니다.  
+로컬 Docker 환경을 Azure 클라우드로 이전한 버전입니다.
+연동 대상마다 전환 난이도가 달랐습니다. Kafka(→Event Hubs)와 PostgreSQL은
+프로토콜이 호환돼 `.env`의 연결 정보만 교체하면 됐지만, MinIO(→ADLS Gen2)는
+API 자체가 달라 `boto3` 코드를 `azure-storage-blob` SDK로 다시 작성해야 했습니다.
 Azure 리소스는 Terraform으로 프로비저닝합니다.
 
 ### Azure 리소스
